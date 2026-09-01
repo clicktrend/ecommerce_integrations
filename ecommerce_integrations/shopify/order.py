@@ -14,7 +14,11 @@ from ecommerce_integrations.shopify.constants import (
 	ORDER_ID_FIELD,
 	ORDER_ITEM_DISCOUNT_FIELD,
 	ORDER_ITEM_PROPERTIES_FIELD,
+	ORDER_ACCOUNT_FIELD,
+	ORDER_FINANCIAL_STATUS_FIELD,
 	ORDER_NUMBER_FIELD,
+	ORDER_PAYMENT_GATEWAY_FIELD,
+	ORDER_PLACED_AT_FIELD,
 	ORDER_STATUS_FIELD,
 	ACCOUNT_DOCTYPE,
 	# SETTING_DOCTYPE,
@@ -81,6 +85,21 @@ def create_order(order, setting, company=None):
 			create_delivery_note(order, setting, so)
 
 
+def _placed_at(value):
+	"""Shopify sends an offset aware timestamp ("2026-09-01T22:14:38+02:00"), which MariaDB
+	rejects for a Datetime column. Convert it to the site's timezone and drop the offset."""
+	from zoneinfo import ZoneInfo
+
+	from frappe.utils import get_system_timezone
+
+	placed_at = get_datetime(value)
+
+	if placed_at and placed_at.tzinfo:
+		placed_at = placed_at.astimezone(ZoneInfo(get_system_timezone())).replace(tzinfo=None)
+
+	return placed_at
+
+
 def create_sales_order(shopify_order, setting, company=None):
 	customer = setting.default_customer
 	if shopify_order.get("customer", {}):
@@ -116,6 +135,12 @@ def create_sales_order(shopify_order, setting, company=None):
 				"naming_series": setting.sales_order_series or "SO-Shopify-",
 				ORDER_ID_FIELD: str(shopify_order.get("id")),
 				ORDER_NUMBER_FIELD: shopify_order.get("name"),
+				# Head facts for the freight contract. Shopify has no delivery deadline and no
+				# priority flag - ship_by and is_prio are Amazon concepts and stay empty here.
+				ORDER_ACCOUNT_FIELD: setting.name,
+				ORDER_FINANCIAL_STATUS_FIELD: shopify_order.get("financial_status"),
+				ORDER_PAYMENT_GATEWAY_FIELD: ", ".join(shopify_order.get("payment_gateway_names") or []),
+				ORDER_PLACED_AT_FIELD: _placed_at(shopify_order.get("created_at")),
 				"customer": customer,
 				"transaction_date": getdate(shopify_order.get("created_at")) or nowdate(),
 				"delivery_date": getdate(shopify_order.get("created_at")) or nowdate(),

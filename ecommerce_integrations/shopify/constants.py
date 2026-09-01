@@ -33,6 +33,12 @@ CUSTOMER_ID_FIELD = "shopify_customer_id"
 ORDER_ID_FIELD = "shopify_order_id"
 ORDER_NUMBER_FIELD = "shopify_order_number"
 ORDER_STATUS_FIELD = "shopify_order_status"
+# Head facts the freight contract needs (concept 2026-08-31-b2c-fracht-schnittstelle §2).
+# The channel matters most: with multi-shop the account IS the channel.
+ORDER_ACCOUNT_FIELD = "shopify_account"
+ORDER_FINANCIAL_STATUS_FIELD = "shopify_financial_status"
+ORDER_PAYMENT_GATEWAY_FIELD = "shopify_payment_gateway"
+ORDER_PLACED_AT_FIELD = "shopify_ordered_at"
 FULLFILLMENT_ID_FIELD = "shopify_fulfillment_id"
 SUPPLIER_ID_FIELD = "shopify_supplier_id"
 ADDRESS_ID_FIELD = "shopify_address_id"

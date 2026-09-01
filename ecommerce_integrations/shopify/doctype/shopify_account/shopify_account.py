@@ -15,6 +15,7 @@ from ecommerce_integrations.controllers.setting import (
 )
 from ecommerce_integrations.shopify import connection
 from ecommerce_integrations.shopify.constants import (
+	ACCOUNT_DOCTYPE,
 	ADDRESS_ID_FIELD,
 	CUSTOMER_ID_FIELD,
 	FULLFILLMENT_ID_FIELD,
@@ -23,6 +24,10 @@ from ecommerce_integrations.shopify.constants import (
 	ORDER_ITEM_DISCOUNT_FIELD,
 	ORDER_ITEM_PROPERTIES_FIELD,
 	ORDER_NUMBER_FIELD,
+	ORDER_ACCOUNT_FIELD,
+	ORDER_FINANCIAL_STATUS_FIELD,
+	ORDER_PAYMENT_GATEWAY_FIELD,
+	ORDER_PLACED_AT_FIELD,
 	ORDER_STATUS_FIELD,
 	SUPPLIER_ID_FIELD,
 )
@@ -279,6 +284,39 @@ def setup_custom_fields():
 				label="Shopify Order Status",
 				fieldtype="Small Text",
 				insert_after=ORDER_NUMBER_FIELD,
+				read_only=1,
+				print_hide=1,
+			),
+			dict(
+				fieldname=ORDER_ACCOUNT_FIELD,
+				label="Shopify Account",
+				fieldtype="Link",
+				options=ACCOUNT_DOCTYPE,
+				insert_after=ORDER_STATUS_FIELD,
+				read_only=1,
+				print_hide=1,
+			),
+			dict(
+				fieldname=ORDER_FINANCIAL_STATUS_FIELD,
+				label="Shopify Financial Status",
+				fieldtype="Data",
+				insert_after=ORDER_ACCOUNT_FIELD,
+				read_only=1,
+				print_hide=1,
+			),
+			dict(
+				fieldname=ORDER_PAYMENT_GATEWAY_FIELD,
+				label="Shopify Payment Gateway",
+				fieldtype="Data",
+				insert_after=ORDER_FINANCIAL_STATUS_FIELD,
+				read_only=1,
+				print_hide=1,
+			),
+			dict(
+				fieldname=ORDER_PLACED_AT_FIELD,
+				label="Shopify Ordered At",
+				fieldtype="Datetime",
+				insert_after=ORDER_PAYMENT_GATEWAY_FIELD,
 				read_only=1,
 				print_hide=1,
 			),

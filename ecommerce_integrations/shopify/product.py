@@ -235,15 +235,12 @@ class ShopifyProduct:
 
 			if supplier:
 				return product_dict.get("vendor")
-			supplier = frappe.get_doc(
-				{
-					"doctype": "Supplier",
-					"supplier_name": product_dict.get("vendor"),
-					SUPPLIER_ID_FIELD: product_dict.get("vendor").lower(),
-					"supplier_group": self._get_supplier_group(),
-				}
-			).insert()
-			return supplier.name
+
+			# Do not create one. Shopify's "vendor" is a brand label - our shop puts values
+			# like "Mark Twain" or "Mit-Gravur.de" there, which are not suppliers at all. The
+			# only supplier a dropship B2C instance has is the one the dropship rule sets on
+			# the order line, so creating a Supplier per vendor value only grows the list.
+			return ""
 		else:
 			return ""
 
