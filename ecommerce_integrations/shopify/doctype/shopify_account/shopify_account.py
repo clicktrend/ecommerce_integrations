@@ -362,4 +362,19 @@ def setup_custom_fields():
 		],
 	}
 
+	# PR #374 writes custom_company on Item, Customer and Item Group, and lets
+	# Ecommerce Item fetch from Item.custom_company -- but it never creates the
+	# field. Without it, inserting an Ecommerce Item fails on a clean site with
+	# "Unknown column 'custom_company'". Reported upstream; remove once shipped.
+	company_field = dict(
+		fieldname="custom_company",
+		label="Company",
+		fieldtype="Link",
+		options="Company",
+		read_only=1,
+		print_hide=1,
+	)
+	for doctype in ("Item", "Customer", "Item Group"):
+		custom_fields.setdefault(doctype, []).append(company_field)
+
 	create_custom_fields(custom_fields)
