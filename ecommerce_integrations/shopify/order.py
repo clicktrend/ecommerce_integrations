@@ -13,6 +13,7 @@ from ecommerce_integrations.shopify.constants import (
 	EVENT_MAPPER,
 	ORDER_ID_FIELD,
 	ORDER_ITEM_DISCOUNT_FIELD,
+	ORDER_ITEM_PROPERTIES_FIELD,
 	ORDER_NUMBER_FIELD,
 	ORDER_STATUS_FIELD,
 	ACCOUNT_DOCTYPE,
@@ -171,12 +172,24 @@ def get_order_items(order_items, setting, delivery_date, taxes_inclusive):
 					ORDER_ITEM_DISCOUNT_FIELD: (
 						_get_total_discount(shopify_item) / cint(shopify_item.get("quantity"))
 					),
+					ORDER_ITEM_PROPERTIES_FIELD: _get_item_properties(shopify_item),
 				}
 			)
 		else:
 			items = []
 
 	return items
+
+
+def _get_item_properties(line_item) -> str | None:
+	"""Return Shopify line item properties as JSON, verbatim.
+
+	Properties carry the per-order personalisation (engraving text, font choice).
+	They are stored unparsed on purpose: the meaning of a property is defined
+	downstream, so anything interpreted here would have to be kept in sync twice.
+	"""
+	properties = line_item.get("properties") or []
+	return json.dumps(properties, ensure_ascii=False) if properties else None
 
 
 def _get_item_price(line_item, taxes_inclusive: bool) -> float:

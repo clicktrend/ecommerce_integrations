@@ -21,6 +21,7 @@ from ecommerce_integrations.shopify.constants import (
 	ITEM_SELLING_RATE_FIELD,
 	ORDER_ID_FIELD,
 	ORDER_ITEM_DISCOUNT_FIELD,
+	ORDER_ITEM_PROPERTIES_FIELD,
 	ORDER_NUMBER_FIELD,
 	ORDER_STATUS_FIELD,
 	SUPPLIER_ID_FIELD,
@@ -289,6 +290,14 @@ def setup_custom_fields():
 				fieldtype="Float",
 				insert_after="discount_and_margin",
 				read_only=1,
+			),
+			dict(
+				fieldname=ORDER_ITEM_PROPERTIES_FIELD,
+				label="Shopify Line Item Properties",
+				fieldtype="Long Text",
+				insert_after=ORDER_ITEM_DISCOUNT_FIELD,
+				read_only=1,
+				print_hide=1,
 			),
 		],
 		"Delivery Note": [

@@ -37,6 +37,7 @@ FULLFILLMENT_ID_FIELD = "shopify_fulfillment_id"
 SUPPLIER_ID_FIELD = "shopify_supplier_id"
 ADDRESS_ID_FIELD = "shopify_address_id"
 ORDER_ITEM_DISCOUNT_FIELD = "shopify_item_discount"
+ORDER_ITEM_PROPERTIES_FIELD = "shopify_item_properties"
 ITEM_SELLING_RATE_FIELD = "shopify_selling_rate"
 
 # ERPNext already defines the default UOMs from Shopify but names are different
