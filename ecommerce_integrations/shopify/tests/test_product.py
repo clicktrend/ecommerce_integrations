@@ -6,7 +6,7 @@ import frappe
 import unittest
 from unittest.mock import patch
 
-from ecommerce_integrations.shopify.product import ShopifyProduct, _item_code
+from ecommerce_integrations.shopify.product import MAX_ITEM_NAME, ShopifyProduct, _item_code, _item_name
 
 from .utils import TestCase
 
@@ -189,7 +189,7 @@ def make_item(item_code=None, properties=None):
 	return item
 
 
-class TestItemCode(unittest.TestCase):
+class TestItemNaming(unittest.TestCase):
 	# Deliberately not on the shared TestCase base: its setUpClass still builds the legacy
 	# `Shopify Setting` singleton, which PR #374 removed, so every test inheriting it errors out.
 	def test_item_code_uses_shopify_sku(self):
@@ -213,3 +213,17 @@ class TestItemCode(unittest.TestCase):
 		# abort the whole order import with a duplicate entry error.
 		with patch("frappe.db.exists", return_value="C8HHla"):
 			self.assertEqual(_item_code({"id": 8123456789012, "sku": "C8HHla"}), "8123456789012")
+
+	def test_item_name_keeps_the_variant_suffix(self):
+		# Shopify titles are written for search engines: 1762 of this shop's 14964 variants
+		# exceed Frappe's 140 character limit and abort the import. Trimming the tail would
+		# drop the variant title and leave every variant of a product with the same name.
+		title = "K" * 200
+		name = _item_name(title, "50 Stück")
+
+		self.assertEqual(len(name), MAX_ITEM_NAME)
+		self.assertTrue(name.endswith("-50 Stück"))
+
+		# Short titles stay untouched, and a plain item needs no suffix.
+		self.assertEqual(_item_name("Kugelschreiber"), "Kugelschreiber")
+		self.assertEqual(_item_name("Kugelschreiber", "1 Stück"), "Kugelschreiber-1 Stück")

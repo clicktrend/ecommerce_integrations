@@ -163,7 +163,9 @@ def get_order_items(order_items, setting, delivery_date, taxes_inclusive):
 			items.append(
 				{
 					"item_code": item_code,
-					"item_name": shopify_item.get("name"),
+					# Shopify line item names carry the full SEO title and blow past Frappe's 140
+					# character limit, which aborts the order import (see _item_name in product.py).
+					"item_name": cstr(shopify_item.get("name")).strip()[:140],
 					"rate": _get_item_price(shopify_item, taxes_inclusive),
 					"delivery_date": delivery_date,
 					"qty": shopify_item.get("quantity"),
@@ -341,7 +343,7 @@ def update_taxes_with_shipping_lines(taxes, shipping_lines, setting, items, taxe
 				taxes.append(
 					{
 						"charge_type": "Actual",
-						"account_head": get_tax_account_head(shipping_charge, charge_type="shipping"),
+						"account_head": get_tax_account_head(shipping_charge, setting, charge_type="shipping"),
 						"description": get_tax_account_description(shipping_charge, setting)
 						or shipping_charge["title"],
 						"tax_amount": shipping_charge_amount,
@@ -353,7 +355,7 @@ def update_taxes_with_shipping_lines(taxes, shipping_lines, setting, items, taxe
 			taxes.append(
 				{
 					"charge_type": "Actual",
-					"account_head": get_tax_account_head(tax, charge_type="sales_tax"),
+					"account_head": get_tax_account_head(tax, setting, charge_type="sales_tax"),
 					"description": (
 						get_tax_account_description(tax, setting)
 						or f"{tax.get('title')} - {tax.get('rate') * 100.0:.2f}%"

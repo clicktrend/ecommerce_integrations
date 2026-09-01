@@ -128,7 +128,7 @@ class ShopifyProduct:
 			"variant_of": variant_of,
 			"is_stock_item": 1,
 			"item_code": _item_code(product_dict, has_variant),
-			"item_name": product_dict.get("title", "").strip(),
+			"item_name": _item_name(product_dict.get("title", "")),
 			"description": product_dict.get("body_html") or product_dict.get("title"),
 			"item_group": self._get_item_group(product_dict.get("product_type")),
 			"has_variants": has_variant,
@@ -173,7 +173,7 @@ class ShopifyProduct:
 				shopify_item_variant = {
 					"id": product_dict.get("id"),
 					"variant_id": variant.get("id"),
-					"title": product_dict.get("title", "").strip() + "-" + variant.get("title"),
+					"title": _item_name(product_dict.get("title", ""), variant.get("title")),
 					"product_type": product_dict.get("product_type"),
 					"sku": variant.get("sku"),
 					"uom": template_item.stock_uom or _("Nos"),
@@ -267,6 +267,26 @@ def _add_weight_details(product_dict):
 def _has_variants(product_dict) -> bool:
 	options = product_dict.get("options")
 	return bool(options and "Default Title" not in options[0]["values"])
+
+
+MAX_ITEM_NAME = 140
+
+
+def _item_name(title, variant_title=None):
+	"""Fit the Shopify title into Item.item_name.
+
+	Shopify titles are written for search engines and routinely exceed Frappe's 140 character
+	limit - 1762 of this shop's 14964 variants do, and the import aborts on them. Trim the
+	product part rather than the tail, so the variant title survives and the variants stay
+	distinguishable; the untruncated title is kept in the item description anyway.
+	"""
+	title = cstr(title).strip()
+	suffix = "-" + cstr(variant_title).strip() if variant_title else ""
+
+	if len(suffix) >= MAX_ITEM_NAME:
+		return suffix[-MAX_ITEM_NAME:]
+
+	return title[: MAX_ITEM_NAME - len(suffix)] + suffix
 
 
 def _item_code(product_dict, has_variant=False):
