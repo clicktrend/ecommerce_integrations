@@ -127,7 +127,7 @@ class ShopifyProduct:
 		item_dict = {
 			"variant_of": variant_of,
 			"is_stock_item": 1,
-			"item_code": cstr(product_dict.get("item_code")) or cstr(product_dict.get("id")),
+			"item_code": _item_code(product_dict, has_variant),
 			"item_name": product_dict.get("title", "").strip(),
 			"description": product_dict.get("body_html") or product_dict.get("title"),
 			"item_group": self._get_item_group(product_dict.get("product_type")),
@@ -173,7 +173,6 @@ class ShopifyProduct:
 				shopify_item_variant = {
 					"id": product_dict.get("id"),
 					"variant_id": variant.get("id"),
-					"item_code": variant.get("id"),
 					"title": product_dict.get("title", "").strip() + "-" + variant.get("title"),
 					"product_type": product_dict.get("product_type"),
 					"sku": variant.get("sku"),
@@ -268,6 +267,30 @@ def _add_weight_details(product_dict):
 def _has_variants(product_dict) -> bool:
 	options = product_dict.get("options")
 	return bool(options and "Default Title" not in options[0]["values"])
+
+
+def _item_code(product_dict, has_variant=False):
+	"""Item code = Shopify SKU, so the item master stays searchable by the code the shop uses.
+
+	Upstream names items after the numeric Shopify product/variant id, which makes the master
+	unreadable and gives the Amazon side nothing to attach to.
+
+	Two cases keep the numeric id:
+	  * templates - they carry no SKU of their own, and taking the first variant's SKU would
+	    occupy the code that variant needs;
+	  * a SKU that is missing or already used by another item - Shopify permits duplicate SKUs
+	    (23 of them in this catalogue), and a collision would abort the whole order import.
+	"""
+	fallback = cstr(product_dict.get("id"))
+
+	if has_variant:
+		return fallback
+
+	sku = cstr(product_dict.get("sku") or _get_sku(product_dict)).strip()
+	if not sku or frappe.db.exists("Item", sku):
+		return fallback
+
+	return sku
 
 
 def _get_sku(product_dict):

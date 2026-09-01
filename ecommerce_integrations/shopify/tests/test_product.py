@@ -3,7 +3,10 @@
 
 import frappe
 
-from ecommerce_integrations.shopify.product import ShopifyProduct
+import unittest
+from unittest.mock import patch
+
+from ecommerce_integrations.shopify.product import ShopifyProduct, _item_code
 
 from .utils import TestCase
 
@@ -118,6 +121,7 @@ class TestProduct(TestCase):
 		)
 
 
+
 def create_item_attributes():
 	if not frappe.db.exists("Item Attribute", "Test Sync Size"):
 		frappe.get_doc(
@@ -183,3 +187,29 @@ def make_item(item_code=None, properties=None):
 	item.insert()
 
 	return item
+
+
+class TestItemCode(unittest.TestCase):
+	# Deliberately not on the shared TestCase base: its setUpClass still builds the legacy
+	# `Shopify Setting` singleton, which PR #374 removed, so every test inheriting it errors out.
+	def test_item_code_uses_shopify_sku(self):
+		# The item master has to stay searchable by the code the shop uses, and the Amazon
+		# side later attaches to that same code. Upstream names items after the numeric id.
+		simple = {"id": 8123456789012, "variants": [{"sku": "PS273"}]}
+		variant = {"id": 8123456789012, "variant_id": 42, "sku": "PS276-50"}
+
+		with patch("frappe.db.exists", return_value=None):
+			self.assertEqual(_item_code(simple), "PS273")
+			self.assertEqual(_item_code(variant), "PS276-50")
+
+			# A template carries no SKU of its own; taking the first variant's SKU would
+			# occupy the code that variant needs.
+			self.assertEqual(_item_code(simple, has_variant=True), "8123456789012")
+
+			# No SKU at all -> numeric id (12 such variants in the live catalogue).
+			self.assertEqual(_item_code({"id": 8123456789012, "sku": ""}), "8123456789012")
+
+		# Shopify permits duplicate SKUs (23 in the live catalogue). Reusing the code would
+		# abort the whole order import with a duplicate entry error.
+		with patch("frappe.db.exists", return_value="C8HHla"):
+			self.assertEqual(_item_code({"id": 8123456789012, "sku": "C8HHla"}), "8123456789012")
