@@ -25,7 +25,11 @@ from ecommerce_integrations.shopify.constants import (
 )
 from ecommerce_integrations.shopify.customer import ShopifyCustomer
 from ecommerce_integrations.shopify.product import create_items_if_not_exist, get_item_code
-from ecommerce_integrations.shopify.utils import create_shopify_log, get_user_shopify_account
+from ecommerce_integrations.shopify.utils import (
+	create_shopify_log,
+	get_user_shopify_account,
+	to_site_datetime,
+)
 from ecommerce_integrations.utils.price_list import get_dummy_price_list
 from ecommerce_integrations.utils.taxation import get_dummy_tax_category
 
@@ -61,6 +65,8 @@ def sync_sales_order(payload, request_id=None, shopify_account=None):
 				customer.sync_customer(customer=shopify_customer, customer_group=shopify_account.customer_group)
 			else:
 				customer.update_existing_addresses(shopify_customer)
+				# Consent changes between orders; the contact has to follow every time.
+				customer.sync_marketing_consent(shopify_customer)
 
 		create_items_if_not_exist(order, company=shopify_account.company)
 
@@ -86,18 +92,7 @@ def create_order(order, setting, company=None):
 
 
 def _placed_at(value):
-	"""Shopify sends an offset aware timestamp ("2026-09-01T22:14:38+02:00"), which MariaDB
-	rejects for a Datetime column. Convert it to the site's timezone and drop the offset."""
-	from zoneinfo import ZoneInfo
-
-	from frappe.utils import get_system_timezone
-
-	placed_at = get_datetime(value)
-
-	if placed_at and placed_at.tzinfo:
-		placed_at = placed_at.astimezone(ZoneInfo(get_system_timezone())).replace(tzinfo=None)
-
-	return placed_at
+	return to_site_datetime(value)
 
 
 def create_sales_order(shopify_order, setting, company=None):

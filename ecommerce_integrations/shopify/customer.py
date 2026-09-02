@@ -7,10 +7,16 @@ from frappe.utils import cstr, validate_phone_number
 from ecommerce_integrations.controllers.customer import EcommerceCustomer
 from ecommerce_integrations.shopify.constants import (
 	ADDRESS_ID_FIELD,
+	CONTACT_MARKETING_CONSENT_AT_FIELD,
+	CONTACT_MARKETING_OPT_IN_LEVEL_FIELD,
+	CONTACT_MARKETING_STATE_FIELD,
 	CUSTOMER_ID_FIELD,
 	MODULE_NAME,
 )
-from ecommerce_integrations.shopify.utils import get_company_shopify_account
+from ecommerce_integrations.shopify.utils import get_company_shopify_account, to_site_datetime
+
+# The only email_marketing_consent.state that means "may be written to".
+SUBSCRIBED = "subscribed"
 
 
 class ShopifyCustomer(EcommerceCustomer):
@@ -86,11 +92,12 @@ class ShopifyCustomer(EcommerceCustomer):
 		if not (shopify_customer.get("first_name") and shopify_customer.get("email")):
 			return
 
+		_ensure_consent_fields()
 		contact_fields = {
 			"status": "Passive",
 			"first_name": shopify_customer.get("first_name"),
 			"last_name": shopify_customer.get("last_name"),
-			"unsubscribed": not shopify_customer.get("accepts_marketing"),
+			**marketing_consent_fields(shopify_customer),
 		}
 
 		if shopify_customer.get("email"):
@@ -102,6 +109,86 @@ class ShopifyCustomer(EcommerceCustomer):
 			contact_fields["phone_nos"] = [{"phone": phone_no, "is_primary_phone": True}]
 
 		super().create_customer_contact(contact_fields)
+
+	def get_customer_contact_name(self) -> str | None:
+		"""Name of the (oldest) Contact linked to this customer, or None."""
+		try:
+			customer_name = self.get_customer_doc().name
+		except frappe.DoesNotExistError:
+			return None
+
+		contacts = frappe.get_all(
+			"Contact",
+			filters=[
+				["Dynamic Link", "link_doctype", "=", "Customer"],
+				["Dynamic Link", "link_name", "=", customer_name],
+			],
+			pluck="name",
+			order_by="creation asc",
+			limit=1,
+		)
+		return contacts[0] if contacts else None
+
+	def sync_marketing_consent(self, shopify_customer: dict[str, Any]) -> None:
+		"""Carry the current consent state to the linked Contact.
+
+		Called for customers that already exist, i.e. on every order after the first. Consent
+		changes between orders (the customer subscribes or unsubscribes in the shop); the
+		contact has to follow, otherwise ERPNext keeps writing to someone who opted out.
+		Creates the contact when an earlier import left none behind.
+		"""
+		contact_name = self.get_customer_contact_name()
+		if not contact_name:
+			self.create_customer_contact(shopify_customer)
+			return
+
+		_ensure_consent_fields()
+		fields = marketing_consent_fields(shopify_customer)
+		current = frappe.db.get_value("Contact", contact_name, list(fields), as_dict=True) or {}
+		if all(current.get(key) == value for key, value in fields.items()):
+			return
+
+		frappe.db.set_value("Contact", contact_name, fields)
+
+
+def marketing_consent_fields(shopify_customer: dict[str, Any]) -> dict[str, Any]:
+	"""Map Shopify's ``email_marketing_consent`` to the Contact fields.
+
+	Shopify records consent as a state ("subscribed", "not_subscribed", "unsubscribed",
+	"pending", "redacted", "invalid"), an opt-in level ("single_opt_in", "confirmed_opt_in",
+	"unknown") and the time it last changed. All three are kept, because a bare checkbox is
+	no evidence of consent - the timestamp and the level are (GDPR Art. 5(2)).
+
+	``unsubscribed`` is derived and fail-safe: only an explicit "subscribed" clears it. A
+	missing block and a pending double opt-in leave the contact unsubscribed. The legacy
+	``accepts_marketing`` flag is ignored on purpose: it carries no timestamp, and API
+	2024-01 no longer sends it - reading it made every contact unsubscribed silently.
+	"""
+	consent = shopify_customer.get("email_marketing_consent") or {}
+	state = consent.get("state")
+
+	return {
+		CONTACT_MARKETING_STATE_FIELD: state,
+		CONTACT_MARKETING_OPT_IN_LEVEL_FIELD: consent.get("opt_in_level"),
+		CONTACT_MARKETING_CONSENT_AT_FIELD: to_site_datetime(consent.get("consent_updated_at")),
+		"unsubscribed": 0 if state == SUBSCRIBED else 1,
+	}
+
+
+def _ensure_consent_fields() -> None:
+	"""Fail loudly when the Contact fields are missing, instead of dropping the evidence.
+
+	``frappe.get_doc(...).insert()`` ignores unknown keys silently; ``frappe.db.set_value``
+	would raise an opaque SQL error. Both would leave the consent unrecorded.
+	"""
+	meta = frappe.get_meta("Contact")
+	if not meta.has_field(CONTACT_MARKETING_STATE_FIELD):
+		frappe.throw(
+			_(
+				"Shopify marketing consent fields are missing on Contact. "
+				"Save the enabled Shopify Account or run bench migrate to create them."
+			)
+		)
 
 
 def _map_address_fields(shopify_address, customer_name, address_type, email):

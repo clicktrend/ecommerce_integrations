@@ -17,15 +17,18 @@ from ecommerce_integrations.shopify import connection
 from ecommerce_integrations.shopify.constants import (
 	ACCOUNT_DOCTYPE,
 	ADDRESS_ID_FIELD,
+	CONTACT_MARKETING_CONSENT_AT_FIELD,
+	CONTACT_MARKETING_OPT_IN_LEVEL_FIELD,
+	CONTACT_MARKETING_STATE_FIELD,
 	CUSTOMER_ID_FIELD,
 	FULLFILLMENT_ID_FIELD,
 	ITEM_SELLING_RATE_FIELD,
+	ORDER_ACCOUNT_FIELD,
+	ORDER_FINANCIAL_STATUS_FIELD,
 	ORDER_ID_FIELD,
 	ORDER_ITEM_DISCOUNT_FIELD,
 	ORDER_ITEM_PROPERTIES_FIELD,
 	ORDER_NUMBER_FIELD,
-	ORDER_ACCOUNT_FIELD,
-	ORDER_FINANCIAL_STATUS_FIELD,
 	ORDER_PAYMENT_GATEWAY_FIELD,
 	ORDER_PLACED_AT_FIELD,
 	ORDER_STATUS_FIELD,
@@ -251,6 +254,33 @@ def setup_custom_fields():
 				read_only=1,
 				print_hide=1,
 			)
+		],
+		"Contact": [
+			# Consent evidence next to frappe's own unsubscribed flag, which is derived from it.
+			dict(
+				fieldname=CONTACT_MARKETING_STATE_FIELD,
+				label="Shopify Email Marketing State",
+				fieldtype="Data",
+				insert_after="unsubscribed",
+				read_only=1,
+				print_hide=1,
+			),
+			dict(
+				fieldname=CONTACT_MARKETING_OPT_IN_LEVEL_FIELD,
+				label="Shopify Email Marketing Opt-in Level",
+				fieldtype="Data",
+				insert_after=CONTACT_MARKETING_STATE_FIELD,
+				read_only=1,
+				print_hide=1,
+			),
+			dict(
+				fieldname=CONTACT_MARKETING_CONSENT_AT_FIELD,
+				label="Shopify Email Marketing Consent Updated At",
+				fieldtype="Datetime",
+				insert_after=CONTACT_MARKETING_OPT_IN_LEVEL_FIELD,
+				read_only=1,
+				print_hide=1,
+			),
 		],
 		"Address": [
 			dict(

@@ -44,6 +44,12 @@ SUPPLIER_ID_FIELD = "shopify_supplier_id"
 ADDRESS_ID_FIELD = "shopify_address_id"
 ORDER_ITEM_DISCOUNT_FIELD = "shopify_item_discount"
 ORDER_ITEM_PROPERTIES_FIELD = "shopify_item_properties"
+# Marketing consent as Shopify records it (email_marketing_consent), kept on the Contact.
+# A checkbox alone is no evidence of consent; the state, the opt-in level and the time
+# it last changed are (GDPR Art. 5(2)). Concept 2026-09-01-b2c-kundenbestand §5.2.
+CONTACT_MARKETING_STATE_FIELD = "shopify_email_marketing_state"
+CONTACT_MARKETING_OPT_IN_LEVEL_FIELD = "shopify_email_marketing_opt_in_level"
+CONTACT_MARKETING_CONSENT_AT_FIELD = "shopify_email_marketing_consent_at"
 ITEM_SELLING_RATE_FIELD = "shopify_selling_rate"
 
 # ERPNext already defines the default UOMs from Shopify but names are different

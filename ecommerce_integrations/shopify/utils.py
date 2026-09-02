@@ -15,6 +15,23 @@ from ecommerce_integrations.shopify.constants import (
 )
 
 
+def to_site_datetime(value):
+	"""Shopify sends offset-aware timestamps ("2026-09-01T22:14:38+02:00"), which MariaDB
+	rejects for a Datetime column. Convert to the site's timezone and drop the offset."""
+	from zoneinfo import ZoneInfo
+
+	from frappe.utils import get_datetime, get_system_timezone
+
+	if not value:
+		return None
+
+	value = get_datetime(value)
+	if value and value.tzinfo:
+		value = value.astimezone(ZoneInfo(get_system_timezone())).replace(tzinfo=None)
+
+	return value
+
+
 @frappe.whitelist()
 def get_jobs():
     return frappe.utils.background_jobs.get_jobs(site=frappe.local.site)
