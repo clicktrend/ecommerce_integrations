@@ -4,6 +4,7 @@
 import frappe
 from frappe import _
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
+from frappe.custom.doctype.property_setter.property_setter import make_property_setter
 from frappe.utils import get_datetime
 from shopify.collection import PaginatedIterator
 from shopify.resources import Location
@@ -27,6 +28,7 @@ from ecommerce_integrations.shopify.constants import (
 	ORDER_FINANCIAL_STATUS_FIELD,
 	ORDER_ID_FIELD,
 	ORDER_ITEM_DISCOUNT_FIELD,
+	ORDER_ITEM_PERSONALIZATION_SECTION,
 	ORDER_ITEM_PROPERTIES_FIELD,
 	ORDER_NUMBER_FIELD,
 	ORDER_PAYMENT_GATEWAY_FIELD,
@@ -359,13 +361,25 @@ def setup_custom_fields():
 				insert_after="discount_and_margin",
 				read_only=1,
 			),
+			# The personalization is what the order is about: give it a section of its own at
+			# the top of the row form and a grid column. Placed after the discount field it sat
+			# inside "Discount and Margin", a section that stays collapsed for lines without a
+			# discount - staff never found it there.
+			dict(
+				fieldname=ORDER_ITEM_PERSONALIZATION_SECTION,
+				label="Personalization",
+				fieldtype="Section Break",
+				insert_after="item_name",
+			),
 			dict(
 				fieldname=ORDER_ITEM_PROPERTIES_FIELD,
 				label="Shopify Line Item Properties",
 				fieldtype="Long Text",
-				insert_after=ORDER_ITEM_DISCOUNT_FIELD,
+				insert_after=ORDER_ITEM_PERSONALIZATION_SECTION,
 				read_only=1,
 				print_hide=1,
+				in_list_view=1,
+				columns=3,
 			),
 		],
 		"Delivery Note": [
@@ -446,3 +460,10 @@ def setup_custom_fields():
 		custom_fields.setdefault(doctype, []).append(company_field)
 
 	create_custom_fields(custom_fields)
+
+	# The items grid is 10 columns wide and the standard columns already fill it. The delivery
+	# date says nothing on a marketplace order (it is the import date plus a default), so it
+	# yields its place to the personalization; it stays available in the row form.
+	make_property_setter(
+		"Sales Order Item", "delivery_date", "in_list_view", 0, "Check", validate_fields_for_doctype=False
+	)
