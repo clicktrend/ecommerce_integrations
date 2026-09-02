@@ -45,6 +45,7 @@ ADDRESS_ID_FIELD = "shopify_address_id"
 ORDER_ITEM_DISCOUNT_FIELD = "shopify_item_discount"
 ORDER_ITEM_PROPERTIES_FIELD = "shopify_item_properties"
 ORDER_ITEM_PERSONALIZATION_SECTION = "shopify_personalization_section"
+ORDER_ITEM_PERSONALIZED_FIELD = "shopify_personalized"
 # Marketing consent as Shopify records it (email_marketing_consent), kept on the Contact.
 # A checkbox alone is no evidence of consent; the state, the opt-in level and the time
 # it last changed are (GDPR Art. 5(2)). Concept 2026-09-01-b2c-kundenbestand §5.2.

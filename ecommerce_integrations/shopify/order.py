@@ -13,6 +13,7 @@ from ecommerce_integrations.shopify.constants import (
 	EVENT_MAPPER,
 	ORDER_ID_FIELD,
 	ORDER_ITEM_DISCOUNT_FIELD,
+	ORDER_ITEM_PERSONALIZED_FIELD,
 	ORDER_ITEM_PROPERTIES_FIELD,
 	ORDER_ACCOUNT_FIELD,
 	ORDER_FINANCIAL_STATUS_FIELD,
@@ -195,6 +196,7 @@ def get_order_items(order_items, setting, delivery_date, taxes_inclusive):
 						_get_total_discount(shopify_item) / cint(shopify_item.get("quantity"))
 					),
 					ORDER_ITEM_PROPERTIES_FIELD: _get_item_properties(shopify_item),
+					ORDER_ITEM_PERSONALIZED_FIELD: _is_personalized(shopify_item),
 				}
 			)
 		else:
@@ -212,6 +214,27 @@ def _get_item_properties(line_item) -> str | None:
 	"""
 	properties = line_item.get("properties") or []
 	return json.dumps(properties, ensure_ascii=False) if properties else None
+
+
+def _is_personalized(line_item) -> int:
+	"""1 when the buyer chose at least one option on the line (engraving text, font, box).
+
+	A leading underscore only hides a property in the shop's cart ("_Schriftart" and
+	"Schriftart" are the same choice); the personalization plugin's bookkeeping is told
+	apart by its "pplr" prefix ("_pplr_customization_id", "__pplr_line_ref"). Empty values
+	are unfilled form fields. A derived flag for the items grid and for filtering - the
+	properties JSON stays the truth.
+	"""
+	for prop in line_item.get("properties") or []:
+		name = cstr(prop.get("name")).strip()
+		if name and not _is_plugin_bookkeeping(name) and cstr(prop.get("value")).strip():
+			return 1
+
+	return 0
+
+
+def _is_plugin_bookkeeping(name: str) -> bool:
+	return name.lstrip("_").lower().startswith("pplr")
 
 
 def _get_item_price(line_item, taxes_inclusive: bool) -> float:

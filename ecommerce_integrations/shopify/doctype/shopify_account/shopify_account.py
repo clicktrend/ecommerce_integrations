@@ -29,6 +29,7 @@ from ecommerce_integrations.shopify.constants import (
 	ORDER_ID_FIELD,
 	ORDER_ITEM_DISCOUNT_FIELD,
 	ORDER_ITEM_PERSONALIZATION_SECTION,
+	ORDER_ITEM_PERSONALIZED_FIELD,
 	ORDER_ITEM_PROPERTIES_FIELD,
 	ORDER_NUMBER_FIELD,
 	ORDER_PAYMENT_GATEWAY_FIELD,
@@ -362,9 +363,10 @@ def setup_custom_fields():
 				read_only=1,
 			),
 			# The personalization is what the order is about: give it a section of its own at
-			# the top of the row form and a grid column. Placed after the discount field it sat
-			# inside "Discount and Margin", a section that stays collapsed for lines without a
-			# discount - staff never found it there.
+			# the top of the row form. Placed after the discount field it sat inside "Discount
+			# and Margin", a section that stays collapsed for lines without a discount - staff
+			# never found it there. The grid shows only the derived yes/no flag; the properties
+			# themselves are read in the row form.
 			dict(
 				fieldname=ORDER_ITEM_PERSONALIZATION_SECTION,
 				label="Personalization",
@@ -372,14 +374,24 @@ def setup_custom_fields():
 				insert_after="item_name",
 			),
 			dict(
-				fieldname=ORDER_ITEM_PROPERTIES_FIELD,
-				label="Shopify Line Item Properties",
-				fieldtype="Long Text",
+				fieldname=ORDER_ITEM_PERSONALIZED_FIELD,
+				label="Personalisierung",
+				fieldtype="Check",
 				insert_after=ORDER_ITEM_PERSONALIZATION_SECTION,
 				read_only=1,
 				print_hide=1,
 				in_list_view=1,
-				columns=3,
+				columns=2,
+			),
+			dict(
+				fieldname=ORDER_ITEM_PROPERTIES_FIELD,
+				label="Shopify Line Item Properties",
+				fieldtype="Long Text",
+				insert_after=ORDER_ITEM_PERSONALIZED_FIELD,
+				read_only=1,
+				print_hide=1,
+				in_list_view=0,
+				columns=0,
 			),
 		],
 		"Delivery Note": [
