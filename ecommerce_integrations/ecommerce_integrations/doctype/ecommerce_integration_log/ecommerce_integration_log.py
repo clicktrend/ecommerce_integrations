@@ -55,6 +55,19 @@ class EcommerceIntegrationLog(Document):
 		)
 
 
+def link_name(value):
+	"""The name behind a Link value, whether the caller passed a document or its name.
+
+	The webhook path hands the Shopify Account document through (process_request), and
+	a document in a Link field fails validation on save - every webhook died there
+	before it was even queued.
+	"""
+	if value is None or isinstance(value, str):
+		return value
+
+	return getattr(value, "name", None) or cstr(value)
+
+
 def create_log(
 	module_def=None,
 	status="Queued",
@@ -90,7 +103,7 @@ def create_log(
 	log.request_data = request_data or log.request_data
 	log.traceback = log.traceback or frappe.get_traceback()
 	log.status = status
-	log.shopify_account = shopify_account
+	log.shopify_account = link_name(shopify_account)
 	log.save(ignore_permissions=True)
 
 	frappe.db.commit()

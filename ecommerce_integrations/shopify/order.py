@@ -96,6 +96,30 @@ def _placed_at(value):
 	return to_site_datetime(value)
 
 
+def _delivery_date(created_at):
+	"""The order date, but never before today.
+
+	The date is copied onto the dropship purchase order as "Required By", and ERPNext
+	refuses a Required By before the purchase order's own date. An order imported later
+	than the day it was placed - catch-up after an outage, a replay - therefore failed
+	at the very end of its import (replay of #10288/#10261, 2026-09-02).
+	"""
+	placed = getdate(created_at) if created_at else None
+	today = getdate(nowdate())
+
+	return max(placed, today) if placed else today
+
+
+def _missing_lines(order_items):
+	"""Lines of the shopify order whose item the site cannot resolve (see get_order_items)."""
+	missing = []
+	for shopify_item in order_items or []:
+		if not shopify_item.get("product_exists") or not get_item_code(shopify_item):
+			missing.append(shopify_item)
+
+	return missing
+
+
 def create_sales_order(shopify_order, setting, company=None):
 	customer = setting.default_customer
 	if shopify_order.get("customer", {}):
@@ -105,24 +129,28 @@ def create_sales_order(shopify_order, setting, company=None):
 	so = frappe.db.get_value("Sales Order", {ORDER_ID_FIELD: shopify_order.get("id")}, "name")
 
 	if not so:
+		delivery_date = _delivery_date(shopify_order.get("created_at"))
 		items = get_order_items(
 			shopify_order.get("line_items"),
 			setting,
-			getdate(shopify_order.get("created_at")),
+			delivery_date,
 			taxes_inclusive=shopify_order.get("taxes_included"),
 		)
 
 		if not items:
 			message = (
-				"Following items exists in the shopify order but relevant records were"
+				"Following items exist in the shopify order but relevant records were"
 				" not found in the shopify Product master"
 			)
-			product_not_exists = []  # TODO: fix missing items
-			message += "\n" + ", ".join(product_not_exists)
+			message += "\n" + ", ".join(
+				f"{line.get('sku') or line.get('title')} (variant {line.get('variant_id')})"
+				for line in _missing_lines(shopify_order.get("line_items"))
+			)
 
-			create_shopify_log(status="Error", exception=message, rollback=True, shopify_account=setting.name)
-
-			return ""
+			# Raise instead of logging here: sync_sales_order() closes its run with a
+			# "Success" log on the same request id, which used to overwrite the "Error"
+			# written at this point - the order looked imported without any sales order.
+			frappe.throw(message)
 
 		taxes = get_order_taxes(shopify_order, setting, items)
 		so = frappe.get_doc(
@@ -139,7 +167,7 @@ def create_sales_order(shopify_order, setting, company=None):
 				ORDER_PLACED_AT_FIELD: _placed_at(shopify_order.get("created_at")),
 				"customer": customer,
 				"transaction_date": getdate(shopify_order.get("created_at")) or nowdate(),
-				"delivery_date": getdate(shopify_order.get("created_at")) or nowdate(),
+				"delivery_date": delivery_date,
 				"company": setting.company,
 				"currency": shopify_order.get("currency"),
 				"selling_price_list": get_dummy_price_list(),
@@ -181,6 +209,22 @@ def get_order_items(order_items, setting, delivery_date, taxes_inclusive):
 
 		if all_product_exists:
 			item_code = get_item_code(shopify_item)
+			if not item_code:
+				# The variant is unknown here (deleted or renamed in the shop since the order,
+				# never synced): without this guard the line went through as an order without
+				# item code - ignore_mandatory lets it save and submit - and the dropship
+				# purchase order silently never came. Replay of #10263, 2026-09-02.
+				all_product_exists = False
+				product_not_exists.append(
+					{
+						"title": shopify_item.get("title"),
+						"sku": shopify_item.get("sku"),
+						"variant_id": shopify_item.get("variant_id"),
+						ORDER_ID_FIELD: shopify_item.get("id"),
+					}
+				)
+				items = []
+				continue
 			items.append(
 				{
 					"item_code": item_code,
