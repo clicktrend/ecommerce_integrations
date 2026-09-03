@@ -54,6 +54,10 @@ TRANSITIONS = [
 	(g.STATE_SHIPPED, "Abschließen", g.STATE_COMPLETED),
 	(g.STATE_SHIPPED, "Retoure", g.STATE_RETURN),
 	(g.STATE_RETURN, "Abschließen", g.STATE_COMPLETED),
+	# Replacement after a return: a fresh purchase order at Adomio for the same lines.
+	(g.STATE_RETURN, "Ersatz fertigen", g.STATE_READY),
+	# Adomio dropped the order (feedback "cancelled") or a person stops it while it is produced.
+	(g.STATE_IN_PRODUCTION, "Anhalten", g.STATE_ON_HOLD),
 ]
 
 CUSTOM_FIELDS = {
@@ -134,6 +138,23 @@ CUSTOM_FIELDS = {
 			"allow_on_submit": 1,
 		},
 		{
+			"fieldname": "b2c_shopify_fulfillment_id",
+			"label": "Shopify-Fulfillment",
+			"fieldtype": "Data",
+			"insert_after": "b2c_carrier",
+			"read_only": 1,
+			"allow_on_submit": 1,
+		},
+		{
+			"fieldname": "b2c_refunded_amount",
+			"label": "Erstattet",
+			"fieldtype": "Currency",
+			"options": "currency",
+			"insert_after": "b2c_shopify_fulfillment_id",
+			"read_only": 1,
+			"allow_on_submit": 1,
+		},
+		{
 			"fieldname": "b2c_gauge_mail_sent",
 			"label": "Multisizer-Mail gesendet",
 			"fieldtype": "Check",
@@ -141,7 +162,18 @@ CUSTOM_FIELDS = {
 			"read_only": 1,
 			"allow_on_submit": 1,
 		},
-	]
+	],
+	"Purchase Order": [
+		{
+			"fieldname": "b2c_replacement_of",
+			"label": "Ersatz für Bestellung",
+			"fieldtype": "Link",
+			"options": "Purchase Order",
+			"insert_after": "supplier_name",
+			"read_only": 1,
+			"description": "Ersatzfertigung nach Retoure: die ursprüngliche Bestellung an Adomio.",
+		},
+	],
 }
 
 

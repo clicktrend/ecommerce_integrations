@@ -1,8 +1,9 @@
 """Feedback channel Oro -> ERPNext (B2C). Oro's ErpNext connector calls these once per purchase
 order: `in_production` when the RFO behind it has become an Oro order, `shipped` when that
-order carries a tracking number (Marello's outgoing push). Both are idempotent; the caller is
-the connector user (role "Oro Connector"), the bookkeeping runs as Administrator like the
-Shopify webhooks do.
+order carries a tracking number (Marello's outgoing push), `cancelled` when Oro/Adomio dropped
+the request or the order (stock, error, operator). All are idempotent; the caller is the
+connector user (role "Oro Connector"), the bookkeeping runs as Administrator like the Shopify
+webhooks do.
 """
 
 import frappe
@@ -59,4 +60,17 @@ def shipped(purchase_order, tracking_number=None, carrier=None):
 		gates.log_gate(so, f"Ringmaß versendet ({carrier or '?'} {tracking_number or ''})")
 		return {"sales_order": sales_order, "gauge": True}
 	result = gates.mark_shipped(sales_order, tracking_number=tracking_number, carrier=carrier)
+	return {"sales_order": sales_order, **(result or {})}
+
+
+@frappe.whitelist()
+def cancelled(purchase_order, reason=None):
+	"""Oro/Adomio cancelled the request or the order behind this purchase order: the purchase
+	order is cancelled here too and the sales order parked ("Angehalten") for a person to decide -
+	reorder, replace or cancel towards the customer. Nothing goes to the customer automatically
+	(no auto-cancel, no refund: money stays a manual step). A ring-gauge order only leaves a note."""
+	frappe.only_for(ROLES)
+	frappe.set_user("Administrator")
+	sales_order = _sales_order_for(purchase_order)
+	result = gates.mark_cancelled_by_supplier(sales_order, purchase_order, reason=reason)
 	return {"sales_order": sales_order, **(result or {})}

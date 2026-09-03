@@ -267,6 +267,18 @@ def on_update_after_submit(doc, method=None):
 		)
 	elif state == STATE_IN_PRODUCTION and flt(doc.per_delivered) < IN_PRODUCTION_PROGRESS:
 		mark_in_production(doc.name)
+	elif state == STATE_READY and _previous_state(doc) == STATE_RETURN:
+		# Manual action "Ersatz fertigen": a fresh purchase order at Adomio for the same lines.
+		frappe.enqueue(
+			"ecommerce_integrations.b2c.gates.ensure_replacement_po",
+			sales_order=doc.name,
+			enqueue_after_commit=True,
+		)
+
+
+def _previous_state(doc):
+	before = doc.get_doc_before_save() if hasattr(doc, "get_doc_before_save") else None
+	return before.get(STATE_FIELD) if before else None
 
 
 def mark_in_production(sales_order):
@@ -357,6 +369,12 @@ def mark_shipped(sales_order, tracking_number=None, carrier=None):
 	invoice = ensure_sales_invoice(so)
 	so.reload()
 	set_state(so, STATE_SHIPPED, tracking_number)
+	fulfillment = None
+	if is_shopify(so):
+		# Closes the order in the shop and lets Shopify send its shipping mail (README §2 switch).
+		from ecommerce_integrations.b2c.shopify_fulfillment import push_fulfillment
+
+		fulfillment = push_fulfillment(so, tracking_number=tracking_number, carrier=carrier)
 	if invoice and not so.get("b2c_shipping_mail_sent"):
 		# Marello's order_invoiced mail: tracking number plus the invoice for the records.
 		from ecommerce_integrations.b2c.reminders import send_template
@@ -376,7 +394,13 @@ def mark_shipped(sales_order, tracking_number=None, carrier=None):
 		+ (f"Rechnung {invoice}; " if invoice else "")
 		+ f"geliefert {flt(so.per_delivered):.0f} %, berechnet {flt(so.per_billed):.0f} %",
 	)
-	return {"delivered": delivered, "invoice": invoice, "per_delivered": so.per_delivered, "per_billed": so.per_billed}
+	return {
+		"delivered": delivered,
+		"invoice": invoice,
+		"fulfillment": fulfillment,
+		"per_delivered": so.per_delivered,
+		"per_billed": so.per_billed,
+	}
 
 
 def mark_paid(sales_order, financial_status="paid"):
@@ -385,3 +409,102 @@ def mark_paid(sales_order, financial_status="paid"):
 		"Sales Order", sales_order, "shopify_financial_status", financial_status, update_modified=False
 	)
 	return evaluate(sales_order, trigger=f"Zahlung: {financial_status}")
+
+
+FINAL_STATES = (STATE_SHIPPED, STATE_COMPLETED, STATE_RETURN, STATE_CANCELLED, STATE_ARCHIVED)
+
+
+def mark_cancelled_by_supplier(sales_order, purchase_order, reason=None):
+	"""Adomio cancelled the request/order behind a purchase order (Oro feedback "cancelled"):
+	the purchase order is cancelled here as well and the sales order parked for a decision -
+	"Fortsetzen" reorders (the gates create a new purchase order), "Ersatz fertigen" after a
+	return, or a cancellation towards the customer. Nothing reaches the customer automatically
+	and no money moves (BookStack: no auto-cancel)."""
+	so = frappe.get_doc("Sales Order", sales_order)
+	if so.docstatus != 1:
+		return None
+	po = frappe.get_doc("Purchase Order", purchase_order)
+	if po.docstatus == 1:
+		po.flags.ignore_permissions = True
+		po.cancel()
+	text = f"Adomio hat {purchase_order} storniert" + (f": {reason}" if reason else "")
+	gauge = bool(po.items) and all(item.item_code == MULTISIZER_ITEM for item in po.items)
+	if gauge:
+		log_gate(so, text + " (Ringmaß) – bitte neu bestellen oder den Kunden informieren")
+		return {"purchase_order": purchase_order, "cancelled": po.docstatus == 2, "gauge": True}
+	so.reload()
+	state = so.get(STATE_FIELD)
+	if state in FINAL_STATES:
+		log_gate(so, text + f" – Auftrag ist bereits „{state}“, keine Änderung")
+	else:
+		set_state(so, STATE_ON_HOLD, text)
+		log_gate(so, "Bitte entscheiden: Fortsetzen (neue Bestellung an Adomio) oder Storno beim Kunden")
+	return {"purchase_order": purchase_order, "cancelled": po.docstatus == 2, "state": so.get(STATE_FIELD)}
+
+
+def latest_ring_po(so):
+	"""The most recent submitted or delivered purchase order behind the order that is not the
+	ring gauge - the one a replacement copies."""
+	names = frappe.get_all(
+		"Purchase Order Item",
+		filters={"sales_order": so.name, "docstatus": 1, "item_code": ["!=", MULTISIZER_ITEM]},
+		pluck="parent",
+		order_by="creation desc",
+	)
+	return names[0] if names else None
+
+
+def ensure_replacement_po(sales_order):
+	"""Replacement after a return (manual action "Ersatz fertigen"): a new purchase order at
+	Adomio with the lines of the last ring order, free for the customer (the invoice already
+	exists). The lines link to the sales order but not to its rows - ERPNext would count the
+	quantity against the row a second time; Oro's mapper finds the engraving by item code."""
+	so = frappe.get_doc("Sales Order", sales_order)
+	if so.docstatus != 1:
+		return None
+	original = latest_ring_po(so)
+	if not original:
+		log_gate(so, "Ersatzfertigung: keine Bestellung an Adomio gefunden, die kopiert werden könnte")
+		return None
+	if frappe.db.exists("Purchase Order", {"b2c_replacement_of": original, "docstatus": ["<", 2]}):
+		return None
+	src = frappe.get_doc("Purchase Order", original)
+	po = frappe.get_doc(
+		{
+			"doctype": "Purchase Order",
+			"company": src.company,
+			"supplier": src.supplier,
+			"transaction_date": nowdate(),
+			"schedule_date": nowdate(),
+			"customer": src.customer,
+			"customer_name": src.customer_name,
+			"shipping_address": so.shipping_address_name,
+			"shipping_address_display": so.shipping_address,
+			"b2c_replacement_of": original,
+			"remarks": f"Ersatzfertigung nach Retoure für {original}",
+			"items": [
+				{
+					"item_code": item.item_code,
+					"item_name": item.item_name,
+					"description": item.description,
+					"qty": item.qty,
+					"uom": item.uom,
+					"stock_uom": item.stock_uom,
+					"conversion_factor": item.conversion_factor or 1,
+					"rate": item.rate,
+					"schedule_date": nowdate(),
+					"warehouse": item.warehouse,
+					"delivered_by_supplier": 1,
+					"sales_order": so.name,
+				}
+				for item in src.items
+				if item.item_code != MULTISIZER_ITEM
+			],
+		}
+	)
+	po.flags.ignore_mandatory = True
+	po.insert(ignore_permissions=True)
+	po.submit()
+	log_gate(so, f"Ersatzfertigung: {po.name} an Adomio eingereicht (Ersatz für {original})")
+	return po.name
+
