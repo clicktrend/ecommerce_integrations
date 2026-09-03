@@ -37,7 +37,7 @@ STATE_CANCELLED = "Storniert"
 GATE_STATES = (STATE_OPEN, STATE_WAIT_PAYMENT, STATE_WAIT_SIZE, STATE_ADDRESS, None, "")
 
 PAID_STATUSES = ("paid", "partially_refunded")
-IN_PRODUCTION_PROGRESS = 50.0  # % Delivered shown while Adomio produces (display only)
+IN_PRODUCTION_PROGRESS = 50.0  # see PROGRESS below
 MULTISIZER_ITEM = "multisizer"
 MULTISIZER_SUFFIX = "-multisizer"
 MULTISIZER_VALUE = "multisizer"
@@ -47,12 +47,29 @@ def log_gate(so, text):
 	so.add_comment("Info", f"B2C-Workflow: {text}")
 
 
+# What the list's "% Delivered" bar shows per state before the real delivery bookkeeping at
+# shipping (user decision 2026-09-03: the bar is the order's progress through the gates).
+PROGRESS = {
+	STATE_OPEN: 5.0,
+	STATE_WAIT_PAYMENT: 10.0,
+	STATE_WAIT_SIZE: 20.0,
+	STATE_ADDRESS: 30.0,
+	STATE_WAIT_FEEDBACK: 30.0,
+	STATE_ON_HOLD: 30.0,
+	STATE_READY: 40.0,
+	STATE_IN_PRODUCTION: 50.0,
+}
+
+
 def set_state(so, state, note=None):
-	"""Automatic transition: bypasses the role check on purpose (see module docstring)."""
-	if so.get(STATE_FIELD) == state:
-		return
-	so.db_set(STATE_FIELD, state, update_modified=False)
-	log_gate(so, f"→ {state}" + (f" ({note})" if note else ""))
+	"""Automatic transition: bypasses the role check on purpose (see module docstring). Also
+	moves the progress bar; a real delivery value (100 at shipping) is never lowered."""
+	if so.get(STATE_FIELD) != state:
+		so.db_set(STATE_FIELD, state, update_modified=False)
+		log_gate(so, f"→ {state}" + (f" ({note})" if note else ""))
+	progress = PROGRESS.get(state)
+	if progress is not None and flt(so.per_delivered) < 100 and flt(so.per_delivered) != progress:
+		so.db_set("per_delivered", progress, update_modified=False)
 
 
 def is_shopify(so):
@@ -260,7 +277,6 @@ def mark_in_production(sales_order):
 	so = frappe.get_doc("Sales Order", sales_order)
 	if so.docstatus != 1:
 		return
-	so.db_set("per_delivered", IN_PRODUCTION_PROGRESS, update_modified=False)
 	set_state(so, STATE_IN_PRODUCTION)
 	log_gate(so, f"in Produktion bei Adomio, Fortschritt {IN_PRODUCTION_PROGRESS:.0f} %")
 
@@ -341,6 +357,13 @@ def mark_shipped(sales_order, tracking_number=None, carrier=None):
 	invoice = ensure_sales_invoice(so)
 	so.reload()
 	set_state(so, STATE_SHIPPED, tracking_number)
+	if invoice and not so.get("b2c_shipping_mail_sent"):
+		# Marello's order_invoiced mail: tracking number plus the invoice for the records.
+		from ecommerce_integrations.b2c.reminders import send_template
+
+		attachments = [frappe.attach_print("Sales Invoice", invoice, file_name=invoice)]
+		if send_template(so, "B2C Versandbestätigung", attachments=attachments):
+			so.db_set("b2c_shipping_mail_sent", 1, update_modified=False)
 	log_gate(
 		so,
 		"Versand gebucht: "

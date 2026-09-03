@@ -125,6 +125,22 @@ CUSTOM_FIELDS = {
 			"read_only": 1,
 			"allow_on_submit": 1,
 		},
+		{
+			"fieldname": "b2c_shipping_mail_sent",
+			"label": "Versandmail gesendet",
+			"fieldtype": "Check",
+			"insert_after": "b2c_carrier",
+			"read_only": 1,
+			"allow_on_submit": 1,
+		},
+		{
+			"fieldname": "b2c_gauge_mail_sent",
+			"label": "Multisizer-Mail gesendet",
+			"fieldtype": "Check",
+			"insert_after": "b2c_shipping_mail_sent",
+			"read_only": 1,
+			"allow_on_submit": 1,
+		},
 	]
 }
 
