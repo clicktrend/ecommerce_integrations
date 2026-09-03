@@ -37,6 +37,7 @@ STATE_CANCELLED = "Storniert"
 GATE_STATES = (STATE_OPEN, STATE_WAIT_PAYMENT, STATE_WAIT_SIZE, STATE_ADDRESS, None, "")
 
 PAID_STATUSES = ("paid", "partially_refunded")
+IN_PRODUCTION_PROGRESS = 50.0  # % Delivered shown while Adomio produces (display only)
 MULTISIZER_ITEM = "multisizer"
 MULTISIZER_SUFFIX = "-multisizer"
 MULTISIZER_VALUE = "multisizer"
@@ -247,6 +248,21 @@ def on_update_after_submit(doc, method=None):
 			sales_order=doc.name,
 			enqueue_after_commit=True,
 		)
+	elif state == STATE_IN_PRODUCTION and flt(doc.per_delivered) < IN_PRODUCTION_PROGRESS:
+		mark_in_production(doc.name)
+
+
+def mark_in_production(sales_order):
+	"""Production signal - today the manual action "In Produktion", later Oro's acceptance
+	(inbox row converted). Shows the order half way in the list's % Delivered column (user
+	decision 2026-09-03): a display value only, the real delivery bookkeeping happens at
+	shipping and overwrites it."""
+	so = frappe.get_doc("Sales Order", sales_order)
+	if so.docstatus != 1:
+		return
+	so.db_set("per_delivered", IN_PRODUCTION_PROGRESS, update_modified=False)
+	set_state(so, STATE_IN_PRODUCTION)
+	log_gate(so, f"in Produktion bei Adomio, Fortschritt {IN_PRODUCTION_PROGRESS:.0f} %")
 
 
 def live_purchase_orders(so):
