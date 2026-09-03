@@ -165,7 +165,9 @@ def create_sales_order(shopify_order, setting, company=None):
 		so = frappe.get_doc(
 			{
 				"doctype": "Sales Order",
-				"naming_series": setting.sales_order_series or "SO-Shopify-",
+				# Channel code + year: the counter restarts every year (5 digits per year and channel),
+				# same pattern as the Amazon app (SO-AMZ-.YYYY.-). User decision 2026-09-03.
+				"naming_series": setting.sales_order_series or "SO-SHP-.YYYY.-",
 				ORDER_ID_FIELD: str(shopify_order.get("id")),
 				ORDER_NUMBER_FIELD: shopify_order.get("name"),
 				# Head facts for the freight contract. Shopify has no delivery deadline and no

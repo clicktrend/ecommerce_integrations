@@ -55,7 +55,7 @@ def create_sales_invoice(shopify_order, setting, so):
 		sales_invoice.set_posting_time = 1
 		sales_invoice.posting_date = posting_date
 		sales_invoice.due_date = posting_date
-		sales_invoice.naming_series = setting.sales_invoice_series or "SI-Shopify-"
+		sales_invoice.naming_series = setting.sales_invoice_series or "SI-SHP-.YYYY.-"
 		sales_invoice.flags.ignore_mandatory = True
 		set_cost_center(sales_invoice.items, setting.cost_center)
 		sales_invoice.insert(ignore_mandatory=True)
