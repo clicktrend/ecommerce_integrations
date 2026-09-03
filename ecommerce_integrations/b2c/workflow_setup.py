@@ -109,6 +109,22 @@ CUSTOM_FIELDS = {
 			"insert_after": "b2c_address_check",
 			"allow_on_submit": 1,
 		},
+		{
+			"fieldname": "b2c_tracking_number",
+			"label": "Sendungsnummer",
+			"fieldtype": "Data",
+			"insert_after": "b2c_address_confirmed",
+			"read_only": 1,
+			"allow_on_submit": 1,
+		},
+		{
+			"fieldname": "b2c_carrier",
+			"label": "Versanddienstleister",
+			"fieldtype": "Data",
+			"insert_after": "b2c_tracking_number",
+			"read_only": 1,
+			"allow_on_submit": 1,
+		},
 	]
 }
 

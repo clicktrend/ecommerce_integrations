@@ -231,15 +231,108 @@ def evaluate_order(sales_order):
 
 
 def on_update_after_submit(doc, method=None):
-	"""A manual workflow action back to "Offen" (payment received, size entered, address
-	confirmed, resume) re-runs the gates."""
-	if doc.get(STATE_FIELD) == STATE_OPEN:
+	"""Manual workflow actions: back to "Offen" (payment received, size entered, address
+	confirmed, resume) re-runs the gates; "Versendet" books the delivery and the invoice."""
+	state = doc.get(STATE_FIELD)
+	if state == STATE_OPEN:
 		frappe.enqueue(
 			"ecommerce_integrations.b2c.gates.evaluate",
 			sales_order=doc.name,
 			trigger="Workflow-Aktion",
 			enqueue_after_commit=True,
 		)
+	elif state == STATE_SHIPPED and (flt(doc.per_delivered) < 100 or flt(doc.per_billed) < 100):
+		frappe.enqueue(
+			"ecommerce_integrations.b2c.gates.mark_shipped",
+			sales_order=doc.name,
+			enqueue_after_commit=True,
+		)
+
+
+def live_purchase_orders(so):
+	return sorted(
+		set(
+			frappe.get_all(
+				"Purchase Order Item",
+				filters={"sales_order": so.name, "docstatus": 1},
+				pluck="parent",
+			)
+		)
+	)
+
+
+def deliver_dropship(so):
+	"""ERPNext's "Deliver (Dropship)" for every submitted purchase order behind the order: the
+	PO becomes "Delivered" and the sales order's % Delivered follows (no Delivery Note in the
+	dropship model)."""
+	delivered = []
+	for name in live_purchase_orders(so):
+		po = frappe.get_doc("Purchase Order", name)
+		changed = False
+		# Mirrors PurchaseOrder.update_dropship_received_qty(): the delivered quantity of a
+		# dropship line is its received_qty, and the sales order's % Delivered sums those.
+		for item in po.items:
+			if item.delivered_by_supplier and flt(item.received_qty) < flt(item.qty):
+				item.db_set("received_qty", item.qty, update_modified=False)
+				changed = True
+		if not changed:
+			continue
+		po.update_receiving_percentage()
+		po.set_status(update=True)
+		po.update_delivered_qty_in_sales_order()
+		delivered.append(name)
+	return delivered
+
+
+def ensure_sales_invoice(so):
+	"""Invoice at shipping (decision 2026-09-03): one submitted Sales Invoice per order. The
+	% Amount Billed of the sales order follows from it; payment is matched later
+	(Shopify payout / bank feed) and closes the order."""
+	from erpnext.selling.doctype.sales_order.sales_order import make_sales_invoice
+
+	if flt(so.per_billed) >= 100:
+		return None
+	existing = frappe.db.get_value(
+		"Sales Invoice Item", {"sales_order": so.name, "docstatus": 1}, "parent"
+	)
+	if existing:
+		return existing
+	si = make_sales_invoice(so.name, ignore_permissions=True)
+	si.set_posting_time = 1
+	si.posting_date = nowdate()
+	si.due_date = nowdate()
+	for field in ("shopify_order_id", "shopify_order_number"):
+		if so.get(field) and si.meta.has_field(field):
+			si.set(field, so.get(field))
+	si.flags.ignore_mandatory = True
+	si.insert(ignore_permissions=True)
+	si.submit()
+	return si.name
+
+
+def mark_shipped(sales_order, tracking_number=None, carrier=None):
+	"""Shipment signal - today the manual action "Versendet", later the feedback channel
+	from Oro/Marello with the tracking number. Books what ERPNext needs to show the order as
+	delivered and billed, then keeps the state."""
+	so = frappe.get_doc("Sales Order", sales_order)
+	if so.docstatus != 1:
+		return
+	if tracking_number:
+		so.db_set(
+			{"b2c_tracking_number": tracking_number, "b2c_carrier": carrier or ""}, update_modified=False
+		)
+	delivered = deliver_dropship(so)
+	invoice = ensure_sales_invoice(so)
+	so.reload()
+	set_state(so, STATE_SHIPPED, tracking_number)
+	log_gate(
+		so,
+		"Versand gebucht: "
+		+ (f"PO geliefert {', '.join(delivered)}; " if delivered else "")
+		+ (f"Rechnung {invoice}; " if invoice else "")
+		+ f"geliefert {flt(so.per_delivered):.0f} %, berechnet {flt(so.per_billed):.0f} %",
+	)
+	return {"delivered": delivered, "invoice": invoice, "per_delivered": so.per_delivered, "per_billed": so.per_billed}
 
 
 def mark_paid(sales_order, financial_status="paid"):
