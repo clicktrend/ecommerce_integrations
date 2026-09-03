@@ -361,7 +361,12 @@ def mark_shipped(sales_order, tracking_number=None, carrier=None):
 		# Marello's order_invoiced mail: tracking number plus the invoice for the records.
 		from ecommerce_integrations.b2c.reminders import send_template
 
-		attachments = [frappe.attach_print("Sales Invoice", invoice, file_name=invoice)]
+		try:
+			attachments = [frappe.attach_print("Sales Invoice", invoice, file_name=invoice)]
+		except Exception as exc:  # no PDF engine (dev) must not block the shipment
+			frappe.log_error(title=f"B2C invoice PDF for {so.name}", message=frappe.get_traceback())
+			log_gate(so, f"Rechnungs-PDF nicht erzeugt: {exc}")
+			attachments = []
 		if send_template(so, "B2C Versandbestätigung", attachments=attachments):
 			so.db_set("b2c_shipping_mail_sent", 1, update_modified=False)
 	log_gate(
