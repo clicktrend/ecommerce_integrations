@@ -17,11 +17,21 @@ def prepare_sales_invoice(payload, request_id=None, shopify_account=None):
 
 	frappe.set_user("Administrator")
 	frappe.flags.request_id = request_id
+	# The webhook hands the account document through; a name (CLI, replay) is loaded here,
+	# same as in sync_sales_order() and cancel_order().
+	if isinstance(shopify_account, str):
+		shopify_account = frappe.get_doc("Shopify Account", shopify_account)
 
 	try:
 		sales_order = get_sales_order(cstr(order["id"]))
 		shopify_account_name = shopify_account.name if shopify_account else None
 		if sales_order:
+			# B2C workflow: the payment is the first gate - record the status on the order and
+			# re-run the gates before (optionally) invoicing. The invoice itself stays behind
+			# the account's sync_sales_invoice switch (decision: invoice at shipping).
+			from ecommerce_integrations.b2c.gates import mark_paid
+
+			mark_paid(sales_order.name, order.get("financial_status") or "paid")
 			create_sales_invoice(order, shopify_account, sales_order)
 			create_shopify_log(status="Success", shopify_account=shopify_account_name)
 		else:

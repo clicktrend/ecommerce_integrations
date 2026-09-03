@@ -116,7 +116,11 @@ doc_events = {
 		],
 	},
 	"Sales Order": {
-		"on_update_after_submit": "ecommerce_integrations.unicommerce.order.update_shipping_info",
+		"on_update_after_submit": [
+			"ecommerce_integrations.unicommerce.order.update_shipping_info",
+			# B2C workflow: a manual action back to "Offen" re-runs the gates
+			"ecommerce_integrations.b2c.gates.on_update_after_submit",
+		],
 		"on_cancel": "ecommerce_integrations.unicommerce.status_updater.ignore_pick_list_on_sales_order_cancel",
 	},
 	"Stock Entry": {
@@ -140,7 +144,10 @@ scheduler_events = {
 		# Updated to use multi-tenant inventory sync
 		"ecommerce_integrations.shopify.inventory.update_inventory_on_shopify"
 	],
-	"daily": [],
+	"daily": [
+		# B2C workflow: payment reminders after 14 days (staff handbook cadence)
+		"ecommerce_integrations.b2c.reminders.send_due_reminders",
+	],
 	"daily_long": ["ecommerce_integrations.zenoti.doctype.zenoti_settings.zenoti_settings.sync_stocks"],
 	"hourly": [
 		# Updated to use multi-tenant old orders sync
