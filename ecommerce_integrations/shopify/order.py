@@ -72,6 +72,15 @@ def sync_sales_order(payload, request_id=None, shopify_account=None):
 		create_items_if_not_exist(order, company=shopify_account.company)
 
 		create_order(order, shopify_account)
+	except frappe.UniqueValidationError:
+		# Two workers processed the same webhook (Shopify retry) at once: the other one won the
+		# unique index on shopify_order_id / shopify_customer_id. Same outcome as the check above.
+		create_shopify_log(
+			status="Invalid",
+			message="Sales order already exists (concurrent retry), not synced",
+			rollback=True,
+			shopify_account=shopify_account_name,
+		)
 	except Exception as e:
 		create_shopify_log(status="Error", exception=e, rollback=True, shopify_account=shopify_account_name)
 	else:

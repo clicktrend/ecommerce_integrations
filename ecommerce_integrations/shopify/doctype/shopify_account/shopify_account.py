@@ -228,7 +228,8 @@ class ShopifyAccount(SettingController):
 		}
 
 
-def setup_custom_fields():
+def get_custom_fields():
+	"""Field definitions of this app on ERPNext doctypes (pure; setup_custom_fields applies them)."""
 	custom_fields = {
 		"Item": [
 			dict(
@@ -246,6 +247,7 @@ def setup_custom_fields():
 				insert_after="series",
 				read_only=1,
 				print_hide=1,
+				unique=1,
 			)
 		],
 		"Supplier": [
@@ -296,13 +298,17 @@ def setup_custom_fields():
 			)
 		],
 		"Sales Order": [
+			# Data + unique: Shopify retries a webhook up to 19 times over 48 h whenever the 200
+			# is late; the "does it exist" check in sync_sales_order is a race between two workers.
+			# The unique index is the guard that survives that race (IDs are 64-bit, < 140 chars).
 			dict(
 				fieldname=ORDER_ID_FIELD,
 				label="Shopify Order Id",
-				fieldtype="Small Text",
+				fieldtype="Data",
 				insert_after="title",
 				read_only=1,
 				print_hide=1,
+				unique=1,
 			),
 			dict(
 				fieldname=ORDER_NUMBER_FIELD,
@@ -471,7 +477,11 @@ def setup_custom_fields():
 	for doctype in ("Item", "Customer", "Item Group"):
 		custom_fields.setdefault(doctype, []).append(company_field)
 
-	create_custom_fields(custom_fields)
+	return custom_fields
+
+
+def setup_custom_fields():
+	create_custom_fields(get_custom_fields())
 
 	# The items grid is 10 columns wide and the standard columns already fill it. The delivery
 	# date says nothing on a marketplace order (it is the import date plus a default), so it
