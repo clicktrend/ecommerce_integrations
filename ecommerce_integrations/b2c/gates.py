@@ -439,6 +439,10 @@ def mark_shipped(sales_order, tracking_number=None, carrier=None):
 	invoice = ensure_sales_invoice(so)
 	so.reload()
 	set_state(so, STATE_SHIPPED, tracking_number)
+	# The photo/render copies are K0: their clock starts with the shipment (30 days).
+	from ecommerce_integrations.b2c.personalization_files import start_purge_clock
+
+	start_purge_clock(so)
 	fulfillment = None
 	if is_shopify(so):
 		# Closes the order in the shop and lets Shopify send its shipping mail (README §2 switch).
