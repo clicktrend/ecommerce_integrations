@@ -63,6 +63,14 @@ EDITABLE_FIELDS = ("address_title", "address_line1", "address_line2", "pincode",
 ACTION_CORRECTED = "Adresse korrigiert"
 ACTION_CONFIRMED = "Adresse bestätigt"
 
+ROLES = ("System Manager", "Sales User", "Sales Manager")
+
+# kind -> (link field on the Sales Order, rendered copy on the Sales Order, label)
+KINDS = {
+	"billing": ("customer_address", "address_display", "Rechnungsadresse"),
+	"shipping": ("shipping_address_name", "shipping_address", "Lieferadresse"),
+}
+
 
 def country_code(country_name):
 	"""ISO2 of an ERPNext country name (Country.code is stored lowercase)."""
@@ -192,7 +200,7 @@ def resolve(sales_order, address=None, confirm=0):
 
 	from ecommerce_integrations.b2c import gates
 
-	frappe.only_for(("System Manager", "Sales User", "Sales Manager"))
+	frappe.only_for(ROLES)
 	so = frappe.get_doc("Sales Order", sales_order)
 	so.check_permission("write")
 	if so.docstatus != 1 or so.get(gates.STATE_FIELD) != gates.STATE_ADDRESS:
@@ -238,3 +246,144 @@ def resolve(sales_order, address=None, confirm=0):
 		"changed": [field for field, _old, _new in changes],
 		"shipping_address": display,
 	}
+
+
+# --- editing either address at any time (buttons in the form's address blocks) -------------
+
+
+def submitted_invoice(sales_order):
+	return frappe.db.get_value("Sales Invoice Item", {"sales_order": sales_order, "docstatus": 1}, "parent")
+
+
+def shipping_note(state, has_live_po):
+	"""What a shipping address change still reaches, by workflow state (pure). Until Adomio has
+	taken the order over, Oro reads the Address record live at its next pull; from "In
+	Produktion" on the change reaches neither Oro nor Marello by itself."""
+	from ecommerce_integrations.b2c import gates
+
+	taken_over = (gates.STATE_IN_PRODUCTION, gates.STATE_SHIPPED, gates.STATE_COMPLETED, gates.STATE_RETURN)
+	if state in taken_over:
+		return (
+			"Adomio hat den Auftrag bereits übernommen – die Änderung erreicht Oro/Marello nicht "
+			"automatisch. Bitte Adomio informieren (Serviceanfrage), damit die Sendung an die neue "
+			"Adresse geht."
+		)
+	if has_live_po:
+		return (
+			"Die Bestellung an Adomio ist eingereicht. Oro liest die neue Adresse beim nächsten Abruf, "
+			"solange Adomio den Auftrag noch nicht übernommen hat."
+		)
+	return ""
+
+
+def _address_for(so, kind):
+	if kind not in KINDS:
+		frappe.throw(f"Unbekannte Adressart: {kind}")
+	link_field, display_field, label = KINDS[kind]
+	name = so.get(link_field)
+	if not name:
+		frappe.throw(f"{so.name} hat keine {label}.")
+	return frappe.get_doc("Address", name), display_field, label
+
+
+def _refresh_purchase_orders(so, address):
+	"""The submitted purchase orders behind the order carry a copy of the shipping text; Oro
+	reads the Address by name, the text is what a person sees on the purchase order."""
+	from frappe.contacts.doctype.address.address import get_address_display
+
+	from ecommerce_integrations.b2c import gates
+
+	text = get_address_display(address.as_dict())
+	names = []
+	for name in gates.live_purchase_orders(so):
+		if frappe.db.get_value("Purchase Order", name, "shipping_address") == address.name:
+			frappe.db.set_value("Purchase Order", name, "shipping_address_display", text, update_modified=False)
+			names.append(name)
+	return names
+
+
+@frappe.whitelist()
+def address_context(sales_order, kind):
+	"""What the form dialog needs before it opens: the editable fields, whether editing is
+	locked (billing address once the invoice is booked) and what a change still reaches."""
+	from ecommerce_integrations.b2c import gates
+
+	frappe.only_for(ROLES)
+	so = frappe.get_doc("Sales Order", sales_order)
+	address, _display_field, label = _address_for(so, kind)
+	state = so.get(gates.STATE_FIELD)
+	gate = kind == "shipping" and state == gates.STATE_ADDRESS
+	ctx = {
+		"kind": kind,
+		"label": label,
+		"address_name": address.name,
+		"address": {field: address.get(field) for field in EDITABLE_FIELDS},
+		"state": state,
+		"gate": gate,
+		"check": so.get("b2c_address_check") if kind == "shipping" else "",
+		"locked": False,
+		"reason": "",
+		"note": "",
+	}
+	if kind == "billing":
+		invoice = submitted_invoice(so.name)
+		if invoice:
+			ctx.update(
+				locked=True,
+				reason=(
+					f"Rechnung {invoice} ist bereits gebucht – die Rechnungsadresse darauf ändert sich "
+					"nicht mehr. Für eine korrigierte Rechnung: Rechnung stornieren und neu erstellen."
+				),
+			)
+	elif not gate:
+		ctx["note"] = shipping_note(state, bool(gates.live_purchase_orders(so)))
+	return ctx
+
+
+@frappe.whitelist()
+def save_address(sales_order, kind, address=None, confirm=0):
+	"""Edit one of the order's addresses in place at any time (buttons in the form's address
+	blocks). The shipping address of an order in "Adressprüfung" goes through resolve(): same
+	dialog, plus the gate's outcome. The billing address is locked once the invoice is booked
+	(it is made from the order's rendered copy at shipping and would not follow)."""
+	from ecommerce_integrations.b2c import gates
+
+	frappe.only_for(ROLES)
+	so = frappe.get_doc("Sales Order", sales_order)
+	so.check_permission("write")
+	if so.docstatus != 1:
+		frappe.throw(f"{so.name} ist nicht eingereicht – Entwürfe direkt im Formular ändern.")
+	if kind == "shipping" and so.get(gates.STATE_FIELD) == gates.STATE_ADDRESS:
+		return resolve(sales_order, address, confirm)
+
+	doc, _display_field, label = _address_for(so, kind)
+	if kind == "billing":
+		invoice = submitted_invoice(so.name)
+		if invoice:
+			frappe.throw(f"Rechnung {invoice} ist bereits gebucht – die Rechnungsadresse ist gesperrt.")
+
+	values = frappe.parse_json(address) or {}
+	changes = _apply_correction(doc, values)
+	if changes:
+		doc.save()
+		gates.log_gate(
+			so,
+			f"{label} korrigiert: " + "; ".join(f"{field} „{old}“ → „{new}“" for field, old, new in changes),
+		)
+	doc = frappe.get_doc("Address", doc.name)
+	result = {
+		"ok": True,
+		"message": "",
+		"changed": [field for field, _old, _new in changes],
+		"display": refresh_display(so, doc),
+		"note": "",
+		"purchase_orders": [],
+	}
+	if kind == "shipping":
+		ok, message = check_address(doc.name)
+		so.db_set("b2c_address_check", "OK" if ok else message, update_modified=False)
+		doc = frappe.get_doc("Address", doc.name)
+		result["display"] = refresh_display(so, doc)
+		result.update(ok=ok, message=message, purchase_orders=_refresh_purchase_orders(so, doc))
+		result["note"] = shipping_note(so.get(gates.STATE_FIELD), bool(result["purchase_orders"]))
+	return result

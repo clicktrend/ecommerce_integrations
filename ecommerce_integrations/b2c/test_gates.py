@@ -4,7 +4,7 @@ import unittest
 import frappe
 
 from ecommerce_integrations.b2c import gates
-from ecommerce_integrations.b2c.address_check import check_lines, house_number
+from ecommerce_integrations.b2c.address_check import check_lines, house_number, shipping_note
 
 
 class TestGatesPure(unittest.TestCase):
@@ -156,3 +156,19 @@ class TestHouseNumberOroRule(unittest.TestCase):
 		self.assertIsNone(house_number("Musterstraße", "", "DE"))
 		self.assertIsNone(house_number("Hauptstr.5", "", "DE"))  # Oro wants a space before it
 		self.assertIsNone(house_number("", "", "DE"))
+
+
+class TestShippingNote(unittest.TestCase):
+	"""What an address change after submit still reaches (dialog hint)."""
+
+	def test_before_purchase_order_nothing_to_say(self):
+		for state in (gates.STATE_OPEN, gates.STATE_WAIT_PAYMENT, gates.STATE_WAIT_SIZE, gates.STATE_ON_HOLD):
+			self.assertEqual(shipping_note(state, False), "", state)
+
+	def test_submitted_purchase_order_is_read_live_by_oro(self):
+		self.assertIn("nächsten Abruf", shipping_note(gates.STATE_READY, True))
+		self.assertIn("nächsten Abruf", shipping_note(gates.STATE_WAIT_SIZE, True))  # ring gauge order
+
+	def test_taken_over_by_adomio_needs_a_service_request(self):
+		for state in (gates.STATE_IN_PRODUCTION, gates.STATE_SHIPPED, gates.STATE_COMPLETED, gates.STATE_RETURN):
+			self.assertIn("Adomio informieren", shipping_note(state, True), state)
