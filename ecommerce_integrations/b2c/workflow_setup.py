@@ -29,11 +29,13 @@ STATES = [
 	(g.STATE_CANCELLED, "2", "Danger"),
 ]
 
-# from, action, to  (manual actions; automation writes the state field directly)
+# from, action, to [, condition]  (manual actions; automation writes the state field directly)
 TRANSITIONS = [
 	(g.STATE_WAIT_PAYMENT, "Zahlung eingegangen", g.STATE_OPEN),
 	(g.STATE_WAIT_SIZE, "Ringgröße eingetragen", g.STATE_OPEN),
-	(g.STATE_ADDRESS, "Adresse bestätigt", g.STATE_OPEN),
+	# "bestätigt" only once the flag is set (dialog "Adresse prüfen" or the checkbox) - without
+	# it the gates would send the order straight back to "Adressprüfung".
+	(g.STATE_ADDRESS, "Adresse bestätigt", g.STATE_OPEN, "doc.b2c_address_confirmed"),
 	(g.STATE_ADDRESS, "Adresse korrigiert", g.STATE_OPEN),
 	(g.STATE_OPEN, "Anhalten", g.STATE_ON_HOLD),
 	(g.STATE_WAIT_PAYMENT, "Anhalten", g.STATE_ON_HOLD),
@@ -206,8 +208,13 @@ def ensure_states():
 			)
 
 
+def transition_rows():
+	for src, action, dst, *rest in TRANSITIONS:
+		yield src, action, dst, (rest[0] if rest else "")
+
+
 def ensure_actions():
-	for _from, action, _to in TRANSITIONS:
+	for _from, action, _to, _condition in transition_rows():
 		if not frappe.db.exists("Workflow Action Master", action):
 			frappe.get_doc({"doctype": "Workflow Action Master", "workflow_action_name": action}).insert(
 				ignore_permissions=True
@@ -244,8 +251,15 @@ def ensure_workflow():
 			for state, docstatus, _style in STATES
 		],
 		"transitions": [
-			{"state": src, "action": action, "next_state": dst, "allowed": ROLE, "allow_self_approval": 1}
-			for src, action, dst in TRANSITIONS
+			{
+				"state": src,
+				"action": action,
+				"next_state": dst,
+				"allowed": ROLE,
+				"allow_self_approval": 1,
+				"condition": condition,
+			}
+			for src, action, dst, condition in transition_rows()
 		],
 	}
 	if frappe.db.exists("Workflow", g.WORKFLOW_NAME):
