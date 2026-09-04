@@ -185,6 +185,25 @@ CUSTOM_FIELDS = {
 			"read_only": 1,
 			"allow_on_submit": 1,
 		},
+		{
+			# Local copies of the photos / renders (b2c.personalization_files): K0 raw store with
+			# a deletion clock - 30 days after shipment, 90 without one.
+			"fieldname": "b2c_perso_files",
+			"label": "Personalisierungsdateien",
+			"fieldtype": "Select",
+			"options": "\nAusstehend\nGeholt\nFehlgeschlagen\nGelöscht",
+			"insert_after": "b2c_gauge_mail_sent",
+			"read_only": 1,
+			"allow_on_submit": 1,
+		},
+		{
+			"fieldname": "b2c_perso_purge_after",
+			"label": "Dateien löschen ab",
+			"fieldtype": "Date",
+			"insert_after": "b2c_perso_files",
+			"read_only": 1,
+			"allow_on_submit": 1,
+		},
 	],
 	"Purchase Order": [
 		{

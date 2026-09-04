@@ -105,6 +105,12 @@ def create_order(order, setting, company=None):
 		if order.get("fulfillments"):
 			create_delivery_note(order, setting, so)
 
+		# Local copies of the photos / renders the properties link to (K0 raw store). Runs once
+		# per order and never raises - the import must not depend on the shop's CDN.
+		from ecommerce_integrations.b2c.personalization_files import after_import
+
+		after_import(so.name)
+
 
 def _placed_at(value):
 	return to_site_datetime(value)

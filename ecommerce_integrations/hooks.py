@@ -147,11 +147,15 @@ scheduler_events = {
 	"daily": [
 		# B2C workflow: payment reminders after 14 days (staff handbook cadence)
 		"ecommerce_integrations.b2c.reminders.send_due_reminders",
+		# Personalization raw store TTL (PII concept K0): 30 days after shipment, 90 without one.
+		"ecommerce_integrations.b2c.personalization_files.purge_expired",
 	],
 	"daily_long": ["ecommerce_integrations.zenoti.doctype.zenoti_settings.zenoti_settings.sync_stocks"],
 	"hourly": [
 		# Updated to use multi-tenant old orders sync
 		"ecommerce_integrations.shopify.order.sync_old_orders",
+		# Personalization files whose download failed get another try for a week.
+		"ecommerce_integrations.b2c.personalization_files.retry_pending",
 		"ecommerce_integrations.amazon.doctype.amazon_sp_api_settings.amazon_sp_api_settings.schedule_get_order_details",
 	],
 	"hourly_long": [
