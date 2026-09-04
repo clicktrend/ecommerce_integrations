@@ -127,7 +127,7 @@ def apply_refund(so, refund):
 
 	# Before shipping: nothing is invoiced yet. A full refund means the order must not be
 	# produced any more - park it; the cancellation itself comes through orders/cancelled.
-	so.db_set("shopify_financial_status", "refunded" if full else "partially_refunded", update_modified=False)
+	gates.set_payment_status(so, financial_status="refunded" if full else "partially_refunded")
 	if full and state not in (gates.STATE_ON_HOLD, gates.STATE_CANCELLED, gates.STATE_ARCHIVED):
 		gates.set_state(so, gates.STATE_ON_HOLD, "vollständig erstattet vor Versand")
 	gates.log_gate(

@@ -37,6 +37,40 @@ STATE_CANCELLED = "Storniert"
 GATE_STATES = (STATE_OPEN, STATE_WAIT_PAYMENT, STATE_WAIT_SIZE, STATE_ADDRESS, None, "")
 
 PAID_STATUSES = ("paid", "partially_refunded")
+
+# Channel neutral payment marker on the Sales Order (custom fields in workflow_setup). Shopify
+# fills it from financial_status, the Amazon app writes "Bezahlt" on import; the gate reads it.
+PAYMENT_STATUS_FIELD = "b2c_payment_status"
+PAYMENT_GATEWAY_FIELD = "b2c_payment_gateway"
+PAYMENT_OPEN = "Offen"
+PAYMENT_PAID = "Bezahlt"
+PAYMENT_PARTIALLY_REFUNDED = "Teilweise erstattet"
+PAYMENT_REFUNDED = "Erstattet"
+PAID_MARKERS = (PAYMENT_PAID, PAYMENT_PARTIALLY_REFUNDED)
+FINANCIAL_TO_PAYMENT = {
+	"paid": PAYMENT_PAID,
+	"partially_refunded": PAYMENT_PARTIALLY_REFUNDED,
+	"refunded": PAYMENT_REFUNDED,
+}
+
+
+def payment_status_from_financial(financial_status):
+	"""Shopify financial_status -> marker. pending, authorized, partially_paid, voided stay open."""
+	return FINANCIAL_TO_PAYMENT.get((financial_status or "").lower(), PAYMENT_OPEN)
+
+
+def set_payment_status(sales_order, financial_status=None, status=None, gateway=None):
+	"""Write the marker (and, for Shopify, the raw financial status) without touching modified."""
+	name = sales_order if isinstance(sales_order, str) else sales_order.name
+	values = {PAYMENT_STATUS_FIELD: status or payment_status_from_financial(financial_status)}
+	if financial_status is not None:
+		values["shopify_financial_status"] = financial_status
+	if gateway is not None:
+		values[PAYMENT_GATEWAY_FIELD] = gateway
+	frappe.db.set_value("Sales Order", name, values, update_modified=False)
+	if not isinstance(sales_order, str):
+		sales_order.update(values)
+	return values[PAYMENT_STATUS_FIELD]
 IN_PRODUCTION_PROGRESS = 50.0  # see PROGRESS below
 MULTISIZER_ITEM = "multisizer"
 MULTISIZER_SUFFIX = "-multisizer"
@@ -81,6 +115,8 @@ def is_paid(so):
 	Shopify order (manual, Amazon later) counts as paid, and so does a zero total."""
 	if flt(so.grand_total) <= 0.01:
 		return True
+	if so.get(PAYMENT_STATUS_FIELD):
+		return so.get(PAYMENT_STATUS_FIELD) in PAID_MARKERS
 	if not is_shopify(so):
 		return True
 	return (so.get("shopify_financial_status") or "").lower() in PAID_STATUSES
@@ -405,9 +441,7 @@ def mark_shipped(sales_order, tracking_number=None, carrier=None):
 
 def mark_paid(sales_order, financial_status="paid"):
 	"""Payment signal (Shopify orders/paid webhook or bank feed): store it and re-run the gates."""
-	frappe.db.set_value(
-		"Sales Order", sales_order, "shopify_financial_status", financial_status, update_modified=False
-	)
+	set_payment_status(sales_order, financial_status=financial_status)
 	return evaluate(sales_order, trigger=f"Zahlung: {financial_status}")
 
 

@@ -70,10 +70,31 @@ CUSTOM_FIELDS = {
 			"collapsible": 1,
 		},
 		{
+			# Channel neutral payment marker (user decision 2026-09-04, variant B): every channel
+			# writes it - Shopify from financial_status, Amazon as paid on import - and the payment
+			# gate reads it. The gateway becomes the Mode of Payment on the invoice later.
+			"fieldname": "b2c_payment_status",
+			"label": "Zahlstatus",
+			"fieldtype": "Select",
+			"options": "\nOffen\nBezahlt\nTeilweise erstattet\nErstattet",
+			"insert_after": "b2c_workflow_section",
+			"read_only": 1,
+			"allow_on_submit": 1,
+			"in_standard_filter": 1,
+		},
+		{
+			"fieldname": "b2c_payment_gateway",
+			"label": "Zahlungsweg",
+			"fieldtype": "Data",
+			"insert_after": "b2c_payment_status",
+			"read_only": 1,
+			"allow_on_submit": 1,
+		},
+		{
 			"fieldname": "b2c_payment_request_sent",
 			"label": "Zahlungsaufforderung gesendet",
 			"fieldtype": "Check",
-			"insert_after": "b2c_workflow_section",
+			"insert_after": "b2c_payment_gateway",
 			"read_only": 1,
 			"allow_on_submit": 1,
 		},
@@ -240,8 +261,31 @@ def ensure_workflow():
 	return "created"
 
 
+def backfill_payment_status():
+	"""Shopify orders created before the marker existed: derive it from the financial status."""
+	rows = frappe.get_all(
+		"Sales Order",
+		filters={"shopify_financial_status": ["is", "set"], "b2c_payment_status": ["in", ["", None]]},
+		fields=["name", "shopify_financial_status", "shopify_payment_gateway"],
+	)
+	for row in rows:
+		frappe.db.set_value(
+			"Sales Order",
+			row.name,
+			{
+				"b2c_payment_status": g.payment_status_from_financial(row.shopify_financial_status),
+				"b2c_payment_gateway": row.shopify_payment_gateway or "",
+			},
+			update_modified=False,
+		)
+	return len(rows)
+
+
 def install():
 	create_custom_fields(CUSTOM_FIELDS, update=True)
+	backfilled = backfill_payment_status()
+	if backfilled:
+		print(f"b2c workflow: payment status derived for {backfilled} existing orders")
 	ensure_multisizer_item()
 	ensure_states()
 	ensure_actions()

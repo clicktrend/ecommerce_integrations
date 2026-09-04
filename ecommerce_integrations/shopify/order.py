@@ -33,6 +33,11 @@ from ecommerce_integrations.shopify.utils import (
 )
 from ecommerce_integrations.utils.price_list import get_dummy_price_list
 from ecommerce_integrations.utils.taxation import get_dummy_tax_category
+from ecommerce_integrations.b2c.gates import (
+	PAYMENT_GATEWAY_FIELD,
+	PAYMENT_STATUS_FIELD,
+	payment_status_from_financial,
+)
 
 DEFAULT_TAX_FIELDS = {
 	"sales_tax": "default_sales_tax_account",
@@ -175,6 +180,9 @@ def create_sales_order(shopify_order, setting, company=None):
 				ORDER_ACCOUNT_FIELD: setting.name,
 				ORDER_FINANCIAL_STATUS_FIELD: shopify_order.get("financial_status"),
 				ORDER_PAYMENT_GATEWAY_FIELD: ", ".join(shopify_order.get("payment_gateway_names") or []),
+				# Channel neutral marker next to the raw Shopify status (b2c.gates reads the marker).
+				PAYMENT_STATUS_FIELD: payment_status_from_financial(shopify_order.get("financial_status")),
+				PAYMENT_GATEWAY_FIELD: ", ".join(shopify_order.get("payment_gateway_names") or []),
 				ORDER_PLACED_AT_FIELD: _placed_at(shopify_order.get("created_at")),
 				"customer": customer,
 				"transaction_date": getdate(shopify_order.get("created_at")) or nowdate(),

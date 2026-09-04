@@ -38,6 +38,25 @@ class TestGatesPure(unittest.TestCase):
 		# zero total never waits for money
 		self.assertTrue(gates.is_paid(frappe._dict(grand_total=0, shopify_account="acc", shopify_financial_status="pending")))
 
+	def test_payment_marker_wins_over_channel_status(self):
+		# The channel neutral marker (b2c_payment_status) is what every channel writes; once it is
+		# set, the raw Shopify status no longer decides, and a non-Shopify order can be unpaid.
+		so = frappe._dict(grand_total=29.0, shopify_account="acc", shopify_financial_status="pending", b2c_payment_status="Bezahlt")
+		self.assertTrue(gates.is_paid(so))
+		so.b2c_payment_status = "Teilweise erstattet"
+		self.assertTrue(gates.is_paid(so))
+		so.b2c_payment_status = "Erstattet"
+		self.assertFalse(gates.is_paid(so))
+		self.assertFalse(gates.is_paid(frappe._dict(grand_total=29.0, shopify_account=None, b2c_payment_status="Offen")))
+
+	def test_financial_status_mapping(self):
+		self.assertEqual(gates.payment_status_from_financial("paid"), "Bezahlt")
+		self.assertEqual(gates.payment_status_from_financial("PAID"), "Bezahlt")
+		self.assertEqual(gates.payment_status_from_financial("partially_refunded"), "Teilweise erstattet")
+		self.assertEqual(gates.payment_status_from_financial("refunded"), "Erstattet")
+		for open_status in ("pending", "authorized", "partially_paid", "voided", "", None):
+			self.assertEqual(gates.payment_status_from_financial(open_status), "Offen", open_status)
+
 
 class TestAddressLines(unittest.TestCase):
 	def test_german_street_with_number(self):
