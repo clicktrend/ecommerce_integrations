@@ -172,3 +172,42 @@ class TestShippingNote(unittest.TestCase):
 	def test_taken_over_by_adomio_needs_a_service_request(self):
 		for state in (gates.STATE_IN_PRODUCTION, gates.STATE_SHIPPED, gates.STATE_COMPLETED, gates.STATE_RETURN):
 			self.assertIn("Adomio informieren", shipping_note(state, True), state)
+
+
+class TestNextStep(unittest.TestCase):
+	"""The gate conditions are independent; the two actions carry their own preconditions:
+	ring gauge = payment + address, production = payment + ring size + address."""
+
+	def step(self, paid, address_ok, size_open):
+		return gates.next_step(paid, address_ok, size_open)
+
+	def test_unpaid_waits_whatever_else_is_open(self):
+		for address_ok in (True, False):
+			for size_open in (True, False):
+				self.assertEqual(
+					self.step(False, address_ok, size_open), (gates.STATE_WAIT_PAYMENT, None)
+				)
+
+	def test_bad_address_holds_the_ring_gauge(self):
+		# The gauge is a letter to the buyer - it must not go out on an address we cannot use.
+		self.assertEqual(self.step(True, False, True), (gates.STATE_ADDRESS, None))
+
+	def test_bad_address_holds_production(self):
+		self.assertEqual(self.step(True, False, False), (gates.STATE_ADDRESS, None))
+
+	def test_paid_with_usable_address_posts_the_gauge(self):
+		self.assertEqual(self.step(True, True, True), (gates.STATE_WAIT_SIZE, "multisizer"))
+
+	def test_everything_green_releases_production(self):
+		self.assertEqual(self.step(True, True, False), (gates.STATE_READY, "production"))
+
+	def test_progress_never_counts_backwards_along_that_order(self):
+		order = [
+			gates.STATE_WAIT_PAYMENT,
+			gates.STATE_ADDRESS,
+			gates.STATE_WAIT_SIZE,
+			gates.STATE_READY,
+			gates.STATE_IN_PRODUCTION,
+		]
+		values = [gates.PROGRESS[s] for s in order]
+		self.assertEqual(values, sorted(values), values)

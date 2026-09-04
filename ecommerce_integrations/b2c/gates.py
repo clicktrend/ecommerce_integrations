@@ -5,6 +5,11 @@ validate_workflow only allows role-gated transitions on save); the Workflow docu
 manual actions people take (payment received, ring size entered, address confirmed, hold,
 resume, archive, return). "Produktionsbereit" is the moment the purchase order to Adomio is
 created AND submitted - the Oro connector reads only submitted purchase orders.
+
+Payment, address and ring size are independent conditions, not a chain: Marello keeps them on
+two workflows that run side by side (click_order_process and click_order_fulfillment_process,
+both started by the same import listener). evaluate() therefore measures all three on every
+run; next_step() holds which of them each action needs.
 """
 
 import json
@@ -86,8 +91,10 @@ def log_gate(so, text):
 PROGRESS = {
 	STATE_OPEN: 5.0,
 	STATE_WAIT_PAYMENT: 10.0,
+	# The address is resolved before the ring gauge is posted (see next_step), so it sits
+	# below "Warten auf Ringgröße" - otherwise the bar would count backwards.
+	STATE_ADDRESS: 15.0,
 	STATE_WAIT_SIZE: 20.0,
-	STATE_ADDRESS: 30.0,
 	STATE_WAIT_FEEDBACK: 30.0,
 	STATE_ON_HOLD: 30.0,
 	STATE_READY: 40.0,
@@ -203,7 +210,8 @@ def multisizer_po_exists(so):
 
 
 def ensure_multisizer_po(so):
-	"""The ring gauge goes out at once, as its own purchase order (Marello's "-multi" order):
+	"""The ring gauge as its own purchase order (Marello's "-multi" order), posted once payment
+	is in (user decision 2026-09-04) and the address is usable - see next_step():
 	item "multisizer", one piece, rate 0, dropshipped by letter to the end customer. The line
 	links back to the sales order (the Oro connector needs that) but not to a sales order item."""
 	if multisizer_po_exists(so):
@@ -242,6 +250,27 @@ def ensure_multisizer_po(so):
 	return po.name
 
 
+def next_step(paid, address_ok, size_open):
+	"""Pure gate resolution. The three conditions are independent of each other - an order can
+	be unpaid, carry an unusable address and miss the ring size all at once (Marello keeps them
+	on two workflows that run side by side). What is genuinely sequential are the preconditions
+	of the two things we hand to Adomio:
+
+	    ring gauge (letter to the buyer)  needs payment (user decision 2026-09-04) + address
+	    production order                  needs payment + ring size + address
+
+	Returns (state, action) with action None | "multisizer" | "production". ERPNext holds one
+	workflow state, so the caller shows the first unmet condition in this order; the address is
+	evaluated on every run regardless, and its result is kept on the order."""
+	if not paid:
+		return STATE_WAIT_PAYMENT, None
+	if not address_ok:
+		return STATE_ADDRESS, None
+	if size_open:
+		return STATE_WAIT_SIZE, "multisizer"
+	return STATE_READY, "production"
+
+
 def evaluate(sales_order, trigger=None):
 	"""Run the gates for one submitted sales order and move it to the state that follows.
 	Safe to call repeatedly: every step is idempotent."""
@@ -251,30 +280,35 @@ def evaluate(sales_order, trigger=None):
 	if so.get(STATE_FIELD) not in GATE_STATES:
 		return so.get(STATE_FIELD)
 
-	if not is_paid(so):
-		set_state(so, STATE_WAIT_PAYMENT, so.get("shopify_financial_status"))
-		if not cint(so.get("b2c_payment_request_sent")):
-			from ecommerce_integrations.b2c.reminders import send_contact
-
-			send_contact(so, 0)
-			so.db_set("b2c_payment_request_sent", 1, update_modified=False)
-		return STATE_WAIT_PAYMENT
-
-	if needs_multisizer(so):
-		ensure_multisizer_po(so)
-		set_state(so, STATE_WAIT_SIZE)
-		return STATE_WAIT_SIZE
-
+	# All three conditions, every run - the address check also while the order still waits for
+	# money, so the operator sees the problem in the same contact as the payment reminder.
+	paid = is_paid(so)
+	address_ok, address_message = True, ""
 	if needs_address_check(so):
-		ok, message = check_address(so.shipping_address_name)
-		so.db_set("b2c_address_check", "OK" if ok else message, update_modified=False)
-		if not ok:
-			set_state(so, STATE_ADDRESS, message)
-			return STATE_ADDRESS
+		address_ok, address_message = check_address(so.shipping_address_name)
+		so.db_set("b2c_address_check", "OK" if address_ok else address_message, update_modified=False)
+	size_open = needs_multisizer(so)
 
-	ensure_dropship_po(so)
-	set_state(so, STATE_READY, trigger)
-	return STATE_READY
+	state, action = next_step(paid, address_ok, size_open)
+
+	if action == "multisizer":
+		ensure_multisizer_po(so)
+	elif action == "production":
+		ensure_dropship_po(so)
+
+	note = {
+		STATE_WAIT_PAYMENT: so.get("shopify_financial_status"),
+		STATE_ADDRESS: address_message,
+		STATE_READY: trigger,
+	}.get(state)
+	set_state(so, state, note)
+
+	if state == STATE_WAIT_PAYMENT and not cint(so.get("b2c_payment_request_sent")):
+		from ecommerce_integrations.b2c.reminders import send_contact
+
+		send_contact(so, 0)
+		so.db_set("b2c_payment_request_sent", 1, update_modified=False)
+	return state
 
 
 @frappe.whitelist()
