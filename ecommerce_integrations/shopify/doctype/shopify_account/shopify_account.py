@@ -326,6 +326,8 @@ def get_custom_fields():
 				read_only=1,
 				print_hide=1,
 			),
+			# Standard filter: with two shops under one company the account is the only field
+			# that tells the orders apart in the list (the naming series changed twice).
 			dict(
 				fieldname=ORDER_ACCOUNT_FIELD,
 				label="Shopify Account",
@@ -334,6 +336,7 @@ def get_custom_fields():
 				insert_after=ORDER_STATUS_FIELD,
 				read_only=1,
 				print_hide=1,
+				in_standard_filter=1,
 			),
 			dict(
 				fieldname=ORDER_FINANCIAL_STATUS_FIELD,
