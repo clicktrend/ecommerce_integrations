@@ -199,9 +199,24 @@ def create_sales_order(shopify_order, setting, company=None):
 				"ignore_pricing_rule": 1,
 				"items": items,
 				"taxes": taxes,
-				"tax_category": get_dummy_tax_category(),
 			}
 		)
+
+		# Shopify Mit-Gravur sends no tax lines (0 % on every order, prices gross). Pinning the dummy
+		# tax category then blocks every template and the invoice carries no VAT at all - decision 1
+		# of the accounting concept says the gross template of the company must apply instead.
+		# With tax lines from the shop, they stay authoritative and the category keeps templates away.
+		if taxes:
+			so.tax_category = get_dummy_tax_category()
+		else:
+			from ecommerce_integrations.b2c import taxes as b2c_taxes
+
+			shipping_country = (shopify_order.get("shipping_address") or {}).get("country")
+			template = b2c_taxes.template_for(so.company, shipping_country)
+			if template:
+				so.taxes_and_charges = template
+				for row in b2c_taxes.rows_of(template):
+					so.append("taxes", row)
 
 		if company:
 			so.update({"company": company, "status": "Draft"})
