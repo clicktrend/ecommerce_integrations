@@ -31,6 +31,8 @@
   "cost_center",
   "income_account",
   "income_account_at",
+  "sender_email",
+  "sender_name",
   "section_break_25",
   "sales_order_series",
   "delivery_note_series",
@@ -240,6 +242,19 @@
    "label": "Income Account (Austria)",
    "options": "Account",
    "description": "Revenue account for deliveries to Austria (tax advisor 2026-09-04: account 8320). Falls back to the income account above when empty."
+  },
+  {
+   "fieldname": "sender_email",
+   "fieldtype": "Data",
+   "options": "Email",
+   "label": "Sender (E-Mail)",
+   "description": "From address of the customer mails of this shop. Empty falls back to the site's default outgoing account - then every brand writes from the same address."
+  },
+  {
+   "fieldname": "sender_name",
+   "fieldtype": "Data",
+   "label": "Sender (Name)",
+   "description": "Name shown next to the sender address, e.g. the brand."
   },
   {
    "fieldname": "section_break_25",

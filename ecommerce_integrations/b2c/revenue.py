@@ -12,8 +12,9 @@ holds the Austrian VAT until it is paid), so the shipping country decides betwee
 
 import frappe
 
+from ecommerce_integrations.b2c import channel
+
 AUSTRIA = "Austria"
-CHANNEL_FIELDS = (("amazon_account", "Amazon SP Account"), ("shopify_account", "Shopify Account"))
 
 
 def account_for(country, income_account, income_account_at):
@@ -25,13 +26,8 @@ def account_for(country, income_account, income_account_at):
 
 def channel_accounts(so):
 	"""(income_account, income_account_at) of the channel this order came from."""
-	for field, doctype in CHANNEL_FIELDS:
-		if not so.get(field):
-			continue
-		row = frappe.db.get_value(doctype, so.get(field), ["income_account", "income_account_at"], as_dict=True)
-		if row:
-			return row.get("income_account"), row.get("income_account_at")
-	return None, None
+	row = channel.values(so, "income_account", "income_account_at")
+	return row.get("income_account"), row.get("income_account_at")
 
 
 def shipping_country(so):

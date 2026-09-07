@@ -4,9 +4,12 @@ a reminder after 14 days, three contacts in total, then the order is archived by
 There is no automatic cancellation.
 """
 
+from email.utils import formataddr
+
 import frappe
 from frappe.utils import add_days, date_diff, getdate, nowdate
 
+from ecommerce_integrations.b2c import channel
 from ecommerce_integrations.b2c.gates import STATE_FIELD, STATE_WAIT_PAYMENT, log_gate
 
 REMINDER_INTERVAL_DAYS = 14
@@ -129,9 +132,18 @@ def send_template(so, template_name, attachments=None, fallback_subject=None, fa
 	if not recipient or not body:
 		log_gate(so, f"Mail „{template_name}“ nicht gesendet: {'keine Empfängeradresse' if not recipient else 'kein Template und kein Standardtext'}")
 		return False
+	# The brand writes to its own customers: sevdesk sends from the channel address
+	# (SevdeskCommand::handleDownloaded reads the sales channel), and so do we. Without a sender on the
+	# channel account the site's default outgoing account applies, as before.
+	# frappe.sendmail takes one sender string, no separate display name.
+	brand = channel.values(so, "sender_email", "sender_name")
+	sender = brand.get("sender_email") or None
+	if sender and brand.get("sender_name"):
+		sender = formataddr((brand["sender_name"], sender))
 	try:
 		frappe.sendmail(
 			recipients=[recipient],
+			sender=sender,
 			subject=subject,
 			message=body,
 			attachments=attachments or [],
