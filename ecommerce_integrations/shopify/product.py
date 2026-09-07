@@ -26,14 +26,19 @@ class ShopifyProduct:
 		sku: str | None = None,
 		has_variants: int | None = 0,
 		company: str | None = None,
+		setting=None,
 	):
 		self.product_id = str(product_id)
 		self.variant_id = str(variant_id) if variant_id else None
 		self.sku = str(sku) if sku else None
 		self.has_variants = has_variants
 		self.company = company
-		self.setting = get_company_shopify_account(company)
-		if not self.setting.is_enabled():
+		# The account decides which shop is asked for the product. Callers that know it (the
+		# order import hands its account through) pass it; the company lookup is only the
+		# fallback for callers without one - it is ambiguous once a company carries two
+		# enabled accounts (mit-gravur + Bildgravur under the same GbR).
+		self.setting = setting or get_company_shopify_account(company)
+		if not self.setting or not self.setting.is_enabled():
 			frappe.throw(_("Can not create Shopify product when integration is disabled."))
 
 	def is_synced(self) -> bool:
@@ -352,13 +357,14 @@ def _match_sku_and_link_item(item_dict, product_id, variant_id, variant_of=None,
 			return False
 
 
-def create_items_if_not_exist(order, company):
-	"""Using shopify order, sync all items that are not already synced."""
+def create_items_if_not_exist(order, company, setting=None):
+	"""Using shopify order, sync all items that are not already synced. `setting` is the
+	account the order belongs to; without it the company lookup decides (single-account case)."""
 	for item in order.get("line_items", []):
 		product_id = item["product_id"]
 		variant_id = item.get("variant_id")
 		sku = item.get("sku")
-		product = ShopifyProduct(product_id, company=company, variant_id=variant_id, sku=sku)
+		product = ShopifyProduct(product_id, company=company, variant_id=variant_id, sku=sku, setting=setting)
 
 		if not product.is_synced():
 			product.sync_product()

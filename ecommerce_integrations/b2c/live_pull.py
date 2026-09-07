@@ -12,6 +12,9 @@ made at shipping, decision 2026-09-03). Cursor: a global default value per accou
 Run periodically (no scheduler on the dev bench):
     bench --site b2c.local execute ecommerce_integrations.b2c.live_pull.pull
     bench --site b2c.local execute ecommerce_integrations.b2c.live_pull.pull --kwargs "{'minutes': 180}"
+
+Without an account every enabled Shopify Account is pulled in turn, each with its own cursor
+(user decision 2026-09-07: all shops run permanently); one shop failing does not stop the next.
 """
 
 import json
@@ -59,11 +62,8 @@ def set_cursor(account_name, value):
 	frappe.db.set_default(cursor_key(account_name), as_utc(value).isoformat())
 
 
-def default_account():
-	name = frappe.db.get_value(ACCOUNT_DOCTYPE, {"enable_shopify": 1}, "name")
-	if not name:
-		frappe.throw("No enabled Shopify Account")
-	return name
+def enabled_accounts():
+	return frappe.get_all(ACCOUNT_DOCTYPE, filters={"enable_shopify": 1}, pluck="name", order_by="name")
 
 
 def apply_order(order, setting, window_start=None):
@@ -115,14 +115,31 @@ def apply_order(order, setting, window_start=None):
 
 
 def pull(account=None, minutes=None, dry_run=False):
-	"""Fetch orders updated since the cursor (or the last `minutes`) and apply them."""
+	"""Fetch orders updated since the cursor (or the last `minutes`) and apply them. Without
+	`account`: every enabled account, results keyed by account name."""
+	if account:
+		return pull_account(account, minutes=minutes, dry_run=dry_run)
+	names = enabled_accounts()
+	if not names:
+		frappe.throw("No enabled Shopify Account")
+	results = {}
+	for name in names:
+		try:
+			results[name] = pull_account(name, minutes=minutes, dry_run=dry_run)
+		except Exception as exc:
+			frappe.log_error(title=f"B2C live pull {name}", message=frappe.get_traceback())
+			results[name] = {"account": name, "error": f"{type(exc).__name__}: {str(exc)[:200]}"}
+	return results
+
+
+def pull_account(account, minutes=None, dry_run=False):
+	"""One account: fetch orders updated since its cursor (or the last `minutes`) and apply them."""
 	import shopify
 	from shopify.collection import PaginatedIterator
 
 	from ecommerce_integrations.shopify.connection import get_temp_session_context
 
 	frappe.set_user("Administrator")
-	account = account or default_account()
 	setting = frappe.get_doc(ACCOUNT_DOCTYPE, account)
 	if not setting.is_enabled():
 		return {"account": account, "skipped": "account disabled"}
