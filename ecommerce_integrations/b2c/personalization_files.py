@@ -17,18 +17,29 @@ accumulate in `font_map.json` per account - the channel key plus resolved family
 contract asks for (docs/plans/2026-08-31-b2c-fracht-schnittstelle.md §3 ①).
 
 Nothing here may fail an order import: every entry point catches, logs and reports.
+
+Stage 3 - the reference (plan docs/plans/2026-09-07-b2c-perso-referenz-stufe3.md, user decision
+2026-09-07): consumers never copy. The identity of a file is (sales order, row, property); the
+`serve` endpoint hands it out to a session or API token with read permission on the order, or to
+anyone holding a valid signed URL from `sign` / `references`. Preview signatures live minutes,
+production references until the K0 clock of the file (`b2c_perso_purge_after`) - the reference
+dies with the file, never later. Every delivery lands in Frappe's Access Log (PII rule R5); a
+purged file answers 410 Gone.
 """
 
 import hashlib
+import hmac
 import json
 import re
 import shutil
 import unicodedata
+from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlencode
 
 import frappe
 from frappe import _
-from frappe.utils import add_days, cint, getdate, now_datetime, today
+from frappe.utils import add_days, cint, get_datetime, get_url, getdate, now_datetime, today
 
 from ecommerce_integrations.shopify.constants import ORDER_ACCOUNT_FIELD, ORDER_ITEM_PROPERTIES_FIELD
 
@@ -60,6 +71,18 @@ FONT_KEY = re.compile(r"^#\d{1,4}$")  # personalizer index, e.g. "#22"
 
 class PersonalizationFileError(Exception):
 	pass
+
+
+class FileGone(frappe.ValidationError):
+	"""The K0 clock ran out: the copy is purged, the reference is dead."""
+
+	http_status_code = 410
+
+
+SERVE_METHOD = "ecommerce_integrations.b2c.personalization_files.serve"
+PREVIEW_TTL_SECONDS = 15 * 60
+PREVIEW_MAX_TTL_SECONDS = 60 * 60
+PURPOSES = ("preview", "production")
 
 
 # --- pure helpers ----------------------------------------------------------------------------
@@ -292,6 +315,55 @@ def update_font_map(path, key, family, ttf, sales_order, now):
 	return entry
 
 
+# --- references and signatures ------------------------------------------------------------------
+
+
+def signing_key(secret=None) -> bytes:
+	"""Derived from the site's encryption key so no second secret has to be managed."""
+	if secret is None:
+		secret = frappe.local.conf.get("encryption_key") or ""
+	if not secret:
+		raise PersonalizationFileError("site has no encryption_key")
+	return hashlib.sha256(f"{secret}:b2c-perso-reference".encode()).digest()
+
+
+def make_signature(so, row, property, exp, key=None) -> str:
+	message = "|".join([str(so), str(row), str(property), str(int(exp))]).encode()
+	return hmac.new(key or signing_key(), message, hashlib.sha256).hexdigest()
+
+
+def verify_signature(so, row, property, exp, sig, key=None, now=None) -> bool:
+	try:
+		exp = int(exp)
+	except (TypeError, ValueError):
+		return False
+	now_ts = int((now or datetime.now(timezone.utc)).timestamp())
+	if exp <= now_ts:
+		return False
+	return hmac.compare_digest(make_signature(so, row, property, exp, key=key), str(sig or ""))
+
+
+def reference_url(so, row, property, exp=None, sig=None, base_url=None) -> str:
+	params = {"so": so, "row": row, "property": property}
+	if exp is not None and sig:
+		params.update(exp=int(exp), sig=sig)
+	return f"{base_url or get_url()}/api/method/{SERVE_METHOD}?{urlencode(params)}"
+
+
+def expiry_for(purpose, purge_after=None, ttl=None, now=None) -> int:
+	"""Unix time a signature ends. Preview: minutes (bounded). Production: the end of the file's
+	K0 day - the reference must not outlive the copy."""
+	now = now or datetime.now(timezone.utc)
+	if purpose == "production":
+		if not purge_after:
+			raise PersonalizationFileError("no K0 clock on the order - nothing to reference")
+		day = getdate(purge_after)
+		end = datetime(day.year, day.month, day.day, 23, 59, 59, tzinfo=timezone.utc)
+		return int(end.timestamp())
+	seconds = min(cint(ttl) or PREVIEW_TTL_SECONDS, PREVIEW_MAX_TTL_SECONDS)
+	return int(now.timestamp()) + max(seconds, 60)
+
+
 # --- store layout ------------------------------------------------------------------------------
 
 
@@ -483,14 +555,86 @@ def _check_read(sales_order):
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 
 
+def _log_access(so, property, method, how):
+	"""Every delivery of a personalization file is a PII access (R5). `how` names the door:
+	session, token or signature."""
+	from frappe.core.doctype.access_log.access_log import make_access_log
+
+	try:
+		make_access_log(doctype="Sales Order", document=so, method=method, page=property, filters={"via": how})
+	except Exception:
+		frappe.log_error(title=f"B2C personalization access log {so}", message=frappe.get_traceback())
+
+
+def _order_files(so):
+	state, purge_after, account = frappe.db.get_value("Sales Order", so, [STATE_FIELD, PURGE_FIELD, ORDER_ACCOUNT_FIELD])
+	if state == STATE_PURGED:
+		frappe.throw(_("The personalization files of this order were deleted after their retention period"), FileGone)
+	meta = read_meta(account or "other", so) if state in (STATE_FETCHED, STATE_FAILED) else None
+	return state, purge_after, account or "other", meta
+
+
+@frappe.whitelist()
+def sign(so, row, property, purpose="preview", ttl=None):
+	"""A signed reference for one file. Needs read permission on the order; the URL itself
+	then works without a login until it expires."""
+	_check_read(so)
+	if purpose not in PURPOSES:
+		frappe.throw(_("Unknown purpose"))
+	state, purge_after, account, meta = _order_files(so)
+	entry = next((e for e in (meta or {}).get("files", []) if e.get("row") == row and e.get("property") == property and e.get("file")), None)
+	if not entry:
+		frappe.throw(_("File not found"), frappe.DoesNotExistError)
+	exp = expiry_for(purpose, purge_after=purge_after, ttl=ttl)
+	sig = make_signature(so, row, property, exp)
+	return {"url": reference_url(so, row, property, exp, sig), "exp": exp, "purpose": purpose}
+
+
+@frappe.whitelist()
+def references(so, purpose="production"):
+	"""Signed references for every file of an order - what a consumer (the Oro connector) asks
+	for once per order instead of copying anything."""
+	_check_read(so)
+	if purpose not in PURPOSES:
+		frappe.throw(_("Unknown purpose"))
+	state, purge_after, account, meta = _order_files(so)
+	files = [e for e in (meta or {}).get("files", []) if e.get("file")]
+	out = {"sales_order": so, "state": state, "purge_after": purge_after, "purpose": purpose, "files": []}
+	if not files:
+		return out
+	exp = expiry_for(purpose, purge_after=purge_after)
+	for e in files:
+		sig = make_signature(so, e["row"], e["property"], exp)
+		out["files"].append(
+			{
+				"row": e["row"],
+				"property": e["property"],
+				"hidden": bool(e.get("hidden")),
+				"content_type": e.get("content_type"),
+				"source": e.get("url"),
+				"url": reference_url(so, e["row"], e["property"], exp, sig),
+				"exp": exp,
+			}
+		)
+	return out
+
+
 @frappe.whitelist()
 def info(so):
-	"""What the card needs: state, clock, which files are there, the learned fonts."""
+	"""What the card needs: state, clock, which files are there (with their unsigned reference),
+	the learned fonts."""
 	_check_read(so)
 	state, purge_after, account = frappe.db.get_value("Sales Order", so, [STATE_FIELD, PURGE_FIELD, ORDER_ACCOUNT_FIELD])
 	meta = read_meta(account or "other", so) if state in (STATE_FETCHED, STATE_FAILED) else None
 	files = [
-		{"row": e.get("row"), "property": e.get("property"), "ok": bool(e.get("file")), "bytes": e.get("bytes"), "error": e.get("error")}
+		{
+			"row": e.get("row"),
+			"property": e.get("property"),
+			"ok": bool(e.get("file")),
+			"bytes": e.get("bytes"),
+			"error": e.get("error"),
+			"reference": reference_url(so, e.get("row"), e.get("property")) if e.get("file") else None,
+		}
 		for e in (meta or {}).get("files", [])
 	]
 	fonts = [
@@ -500,14 +644,23 @@ def info(so):
 	return {"state": state, "purge_after": purge_after, "files": files, "fonts": fonts}
 
 
-@frappe.whitelist()
-def serve(so, row, property):
-	"""The local copy of one property, inline. Read permission on the order is the gate."""
+@frappe.whitelist(allow_guest=True)
+def serve(so, row, property, exp=None, sig=None):
+	"""The local copy of one property, inline. Two doors: a session or API token with read
+	permission on the order, or a valid signed URL (see `sign` / `references`). Guests without a
+	valid signature are refused before anything is read."""
 	from werkzeug.wrappers import Response
 
-	_check_read(so)
-	account = frappe.db.get_value("Sales Order", so, ORDER_ACCOUNT_FIELD) or "other"
-	meta = read_meta(account, so)
+	if sig:
+		if not verify_signature(so, row, property, exp, sig):
+			frappe.throw(_("Signature invalid or expired"), frappe.PermissionError)
+		how = "signature"
+	else:
+		if frappe.session.user == "Guest":
+			frappe.throw(_("Not permitted"), frappe.PermissionError)
+		_check_read(so)
+		how = "token" if frappe.get_request_header("Authorization") else "session"
+	state, _purge_after, account, meta = _order_files(so)
 	entry = next(
 		(e for e in (meta or {}).get("files", []) if e.get("row") == row and e.get("property") == property and e.get("file")),
 		None,
@@ -518,6 +671,7 @@ def serve(so, row, property):
 	path = (directory / entry["file"]).resolve()
 	if directory not in path.parents or not path.is_file():
 		frappe.throw(_("File not found"), frappe.DoesNotExistError)
+	_log_access(so, property, SERVE_METHOD, how)
 	response = Response(path.read_bytes(), mimetype=entry.get("content_type") or "application/octet-stream")
 	response.headers["Content-Disposition"] = f'inline; filename="{entry["file"]}"'
 	response.headers["Cache-Control"] = "private, max-age=3600"
