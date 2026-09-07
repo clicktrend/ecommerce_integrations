@@ -418,6 +418,11 @@ def ensure_sales_invoice(so):
 	for field in ("shopify_order_id", "shopify_order_number"):
 		if so.get(field) and si.meta.has_field(field):
 			si.set(field, so.get(field))
+	# The brand's revenue account belongs to the order, not to the item (see revenue.py).
+	from ecommerce_integrations.b2c.revenue import apply as apply_revenue_account
+
+	if not apply_revenue_account(si, so):
+		log_gate(so, "Erlöskonto: der Kanal führt keins, die Rechnung läuft auf den Company-Standard")
 	si.flags.ignore_mandatory = True
 	si.insert(ignore_permissions=True)
 	si.submit()

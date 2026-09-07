@@ -29,6 +29,8 @@
   "cash_bank_account",
   "column_break_19",
   "cost_center",
+  "income_account",
+  "income_account_at",
   "section_break_25",
   "sales_order_series",
   "delivery_note_series",
@@ -224,6 +226,20 @@
    "label": "Cost Center",
    "mandatory_depends_on": "eval:doc.enable_shopify",
    "options": "Cost Center"
+  },
+  {
+   "fieldname": "income_account",
+   "fieldtype": "Link",
+   "label": "Income Account",
+   "options": "Account",
+   "description": "Revenue account of this shop's brand. The invoice stage writes it on every line, because an item sold on two channels cannot carry the brand on its Item Default."
+  },
+  {
+   "fieldname": "income_account_at",
+   "fieldtype": "Link",
+   "label": "Income Account (Austria)",
+   "options": "Account",
+   "description": "Revenue account for deliveries to Austria (tax advisor 2026-09-04: account 8320). Falls back to the income account above when empty."
   },
   {
    "fieldname": "section_break_25",
