@@ -94,6 +94,10 @@ def make_credit_note(so, refund):
 		for row in credit.items:
 			row.qty = -abs(keep[id(row)])
 			row.stock_qty = row.qty * flt(row.conversion_factor or 1)
+	if credit.meta.get_field("naming_series") and "GU-.YY.-.#####" in (
+		credit.meta.get_field("naming_series").options or ""
+	):
+		credit.naming_series = "GU-.YY.-.#####"
 	credit.set_posting_time = 1
 	credit.posting_date = frappe.utils.nowdate()
 	credit.due_date = credit.posting_date
@@ -102,6 +106,20 @@ def make_credit_note(so, refund):
 	credit.insert(ignore_permissions=True)
 	credit.submit()
 	return credit.name
+
+
+def send_credit_note(so, credit_note):
+	"""Mail the credit note to the buyer, the way the sevdesk chain does
+	(SevdeskCommand::handleRefundedSendMail attaches the PDF and sends it). A failing mail must not
+	roll back the booking, so the attachment is optional and send_template swallows its own errors."""
+	from ecommerce_integrations.b2c.reminders import send_template
+
+	try:
+		attachments = [frappe.attach_print("Sales Invoice", credit_note, file_name=credit_note)]
+	except Exception as exc:
+		gates.log_gate(so, f"Gutschrift-PDF nicht erzeugt: {exc}")
+		attachments = []
+	return send_template(so, "B2C Gutschrift", attachments=attachments)
 
 
 def apply_refund(so, refund):
@@ -115,6 +133,8 @@ def apply_refund(so, refund):
 	if submitted_invoice(so):
 		credit = make_credit_note(so, refund)
 		so.reload()
+		if credit:
+			send_credit_note(so, credit)
 		if state not in (gates.STATE_RETURN, gates.STATE_COMPLETED, gates.STATE_CANCELLED):
 			gates.set_state(so, gates.STATE_RETURN, f"Erstattung {money(amount, so.currency)}")
 		gates.log_gate(

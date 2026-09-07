@@ -426,6 +426,11 @@ def ensure_sales_invoice(so):
 	si.flags.ignore_mandatory = True
 	si.insert(ignore_permissions=True)
 	si.submit()
+	# The money is already in: book it against the gateway's clearing account, or the invoice stands
+	# open and the print format asks the buyer to pay a second time (see payments.py).
+	from ecommerce_integrations.b2c.payments import ensure_payment_entry
+
+	ensure_payment_entry(si.name, so)
 	return si.name
 
 

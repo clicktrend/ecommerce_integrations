@@ -38,6 +38,10 @@ TEMPLATES = {
 		"bestellbestaetigung.html",
 		"Danke! Ihre Bestellung wird vorbereitet. [OR#{{ b2c.order_number }}]",
 	),
+	"B2C Gutschrift": (
+		"gutschrift.html",
+		"Ihre Gutschrift zur Bestellung #{{ b2c.order_number }}",
+	),
 	"B2C Stornierung": (
 		"stornierung.html",
 		"Ihre Bestellung #{{ b2c.order_number }} wurde storniert!",

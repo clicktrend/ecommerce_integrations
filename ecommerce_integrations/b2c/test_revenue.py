@@ -58,3 +58,39 @@ class TestApply(unittest.TestCase):
 		si = self.invoice()
 		self.assertEqual(revenue.apply(si, frappe._dict()), "8320")
 		self.assertEqual([row.income_account for row in si.items], ["8320", "8320"])
+
+
+class TestChannelValues(unittest.TestCase):
+	"""channel.values() is the one place that knows where per-shop settings live; the callers
+	(revenue account, mail sender) must survive an order without a channel."""
+
+	def test_order_without_a_channel_yields_nothing(self):
+		from ecommerce_integrations.b2c import channel
+
+		self.assertEqual(channel.account_of(frappe._dict()), (None, None))
+		self.assertEqual(channel.values(frappe._dict(), "sender_email"), {})
+
+	def test_amazon_wins_over_shopify_when_both_are_set(self):
+		from ecommerce_integrations.b2c import channel
+
+		so = frappe._dict(amazon_account="Schönschmied", shopify_account="shop.myshopify.com")
+		self.assertEqual(channel.account_of(so), ("Amazon SP Account", "Schönschmied"))
+
+
+class TestPaymentGatewayMapping(unittest.TestCase):
+	"""The gateways the connectors actually write (measured on b2c.local: Amazon 209, paypal 77,
+	shopify_payments 65, Bank Deposit 8) must all find a Mode of Payment."""
+
+	def test_known_gateways(self):
+		from ecommerce_integrations.b2c import payments
+
+		self.assertEqual(payments.mode_for("Amazon"), "Amazon")
+		self.assertEqual(payments.mode_for("paypal"), "PayPal Mit Gravur")
+		self.assertEqual(payments.mode_for("shopify_payments"), "Shopify Payments")
+		self.assertEqual(payments.mode_for("Bank Deposit"), "Vorkasse")
+
+	def test_unknown_gateway_is_not_guessed(self):
+		from ecommerce_integrations.b2c import payments
+
+		self.assertIsNone(payments.mode_for("klarna"))
+		self.assertIsNone(payments.mode_for(None))
