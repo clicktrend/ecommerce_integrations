@@ -33,6 +33,7 @@
   "income_account_at",
   "sender_email",
   "sender_name",
+  "brand_logo",
   "section_break_25",
   "sales_order_series",
   "delivery_note_series",
@@ -255,6 +256,12 @@
    "fieldtype": "Data",
    "label": "Sender (Name)",
    "description": "Name shown next to the sender address, e.g. the brand."
+  },
+  {
+   "fieldname": "brand_logo",
+   "fieldtype": "Attach Image",
+   "label": "Brand Logo",
+   "description": "Shown on the invoice of this shop. Empty falls back to the sender name in type."
   },
   {
    "fieldname": "section_break_25",
