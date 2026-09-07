@@ -3,7 +3,7 @@ retry racing on two workers cannot create a second sales order or customer."""
 
 import unittest
 
-from ecommerce_integrations.shopify.constants import CUSTOMER_ID_FIELD, ORDER_ID_FIELD
+from ecommerce_integrations.shopify.constants import CUSTOMER_ID_FIELD, ORDER_ACCOUNT_FIELD, ORDER_ID_FIELD
 from ecommerce_integrations.shopify.doctype.shopify_account.shopify_account import get_custom_fields
 
 
@@ -28,3 +28,9 @@ class TestExternalIdFields(unittest.TestCase):
 	def test_documents_that_may_repeat_an_order_stay_non_unique(self):
 		for doctype in ("Sales Invoice", "Delivery Note"):
 			self.assertFalse(field(doctype, ORDER_ID_FIELD).get("unique"))
+
+	def test_sales_order_account_is_a_standard_filter(self):
+		# Two shops under one company: the account link is what tells the orders apart in the list.
+		definition = field("Sales Order", ORDER_ACCOUNT_FIELD)
+		self.assertEqual(definition["fieldtype"], "Link")
+		self.assertEqual(definition.get("in_standard_filter"), 1)
