@@ -46,7 +46,8 @@ doctype_js = {
 	"Stock Entry": "public/js/unicommerce/stock_entry.js",
 	"Pick List": "public/js/unicommerce/pick_list.js",
 }
-# doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
+# B2C: priority label and deadline column in the Sales Order list (fields of b2c.channel).
+doctype_list_js = {"Sales Order": "public/js/b2c/sales_order_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
 
@@ -72,6 +73,16 @@ doctype_js = {
 
 # before_install = "ecommerce_integrations.install.before_install"
 # after_install = "ecommerce_integrations.install.after_install"
+
+# B2C: custom fields on Sales Order, the field renames of 2026-09-08 and a Sales Channel for every
+# connector account (b2c.channel). Idempotent, so bench migrate is enough after a deploy.
+after_migrate = "ecommerce_integrations.b2c.workflow_setup.after_migrate"
+
+# Sales channel interface (b2c.channel): every integration registers the account DocType it keeps
+# its per-shop settings on. Other apps add their own entry in their hooks; nothing imports anything.
+sales_channel_integrations = {"Shopify Account": {"channel_type": "Webshop"}}
+# Listeners told when a B2C order shipped (gates.mark_shipped -> channel.notify_shipped).
+sales_channel_order_shipped = ["ecommerce_integrations.b2c.shopify_fulfillment.on_shipped"]
 
 
 before_uninstall = "ecommerce_integrations.uninstall.before_uninstall"
@@ -107,6 +118,8 @@ before_uninstall = "ecommerce_integrations.uninstall.before_uninstall"
 # Hook on document methods and events
 
 doc_events = {
+	# A freshly saved connector account gets its Sales Channel (b2c.channel, registry above).
+	"*": {"after_insert": "ecommerce_integrations.b2c.channel.on_integration_insert"},
 	"Item": {
 		"after_insert": "ecommerce_integrations.shopify.product.upload_erpnext_item",
 		"on_update": "ecommerce_integrations.shopify.product.upload_erpnext_item",
@@ -116,6 +129,8 @@ doc_events = {
 		],
 	},
 	"Sales Order": {
+		# B2C: an order that names a Sales Channel carries the whole channel contract.
+		"validate": "ecommerce_integrations.b2c.channel.validate_order",
 		"on_update_after_submit": [
 			"ecommerce_integrations.unicommerce.order.update_shipping_info",
 			# B2C workflow: a manual action back to "Offen" re-runs the gates

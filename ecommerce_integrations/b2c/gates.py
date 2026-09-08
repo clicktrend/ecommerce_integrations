@@ -17,6 +17,7 @@ import json
 import frappe
 from frappe.utils import cint, flt, nowdate
 
+from ecommerce_integrations.b2c import channel
 from ecommerce_integrations.b2c.address_check import check_address
 
 WORKFLOW_NAME = "B2C Auftrag"
@@ -43,10 +44,11 @@ GATE_STATES = (STATE_OPEN, STATE_WAIT_PAYMENT, STATE_WAIT_SIZE, STATE_ADDRESS, N
 
 PAID_STATUSES = ("paid", "partially_refunded")
 
-# Channel neutral payment marker on the Sales Order (custom fields in workflow_setup). Shopify
-# fills it from financial_status, the Amazon app writes "Bezahlt" on import; the gate reads it.
-PAYMENT_STATUS_FIELD = "b2c_payment_status"
-PAYMENT_GATEWAY_FIELD = "b2c_payment_gateway"
+# Channel neutral payment marker on the Sales Order - part of the channel contract every
+# connector writes (b2c.channel.CONTRACT_FIELDS). Shopify fills it from financial_status, the
+# Amazon app writes "Bezahlt" on import; the gate reads only the marker.
+PAYMENT_STATUS_FIELD = "integration_payment_status"
+PAYMENT_GATEWAY_FIELD = "integration_payment_gateway"
 PAYMENT_OPEN = "Offen"
 PAYMENT_PAID = "Bezahlt"
 PAYMENT_PARTIALLY_REFUNDED = "Teilweise erstattet"
@@ -113,20 +115,17 @@ def set_state(so, state, note=None):
 		so.db_set("per_delivered", progress, update_modified=False)
 
 
-def is_shopify(so):
-	return bool(so.get("shopify_account"))
-
-
 def is_paid(so):
-	"""Payment is B2C's responsibility. Shopify tells the status; anything that is not a
-	Shopify order (manual, Amazon later) counts as paid, and so does a zero total."""
+	"""Payment is B2C's responsibility. The channel marker decides; an order from before the
+	marker existed still carries Shopify's raw status; anything else (manual order) counts as
+	paid, and so does a zero total."""
 	if flt(so.grand_total) <= 0.01:
 		return True
 	if so.get(PAYMENT_STATUS_FIELD):
 		return so.get(PAYMENT_STATUS_FIELD) in PAID_MARKERS
-	if not is_shopify(so):
-		return True
-	return (so.get("shopify_financial_status") or "").lower() in PAID_STATUSES
+	if so.get("shopify_financial_status"):
+		return (so.get("shopify_financial_status") or "").lower() in PAID_STATUSES
+	return True
 
 
 def item_properties(row):
@@ -159,7 +158,8 @@ def needs_multisizer(so):
 
 
 def needs_address_check(so):
-	return is_shopify(so) and not cint(so.get("b2c_address_confirmed"))
+	"""The Sales Channel says whether its addresses are checked (webshops yes, marketplaces no)."""
+	return channel.address_check(so) and not cint(so.get("b2c_address_confirmed"))
 
 
 def dropship_rows(so):
@@ -453,12 +453,9 @@ def mark_shipped(sales_order, tracking_number=None, carrier=None):
 	from ecommerce_integrations.b2c.personalization_files import start_purge_clock
 
 	start_purge_clock(so)
-	fulfillment = None
-	if is_shopify(so):
-		# Closes the order in the shop and lets Shopify send its shipping mail (README §2 switch).
-		from ecommerce_integrations.b2c.shopify_fulfillment import push_fulfillment
-
-		fulfillment = push_fulfillment(so, tracking_number=tracking_number, carrier=carrier)
+	# Every integration hears about the shipment through the channel interface (hook
+	# sales_channel_order_shipped): Shopify closes the order in the shop, Amazon confirms it.
+	listeners = channel.notify_shipped(so, tracking_number=tracking_number, carrier=carrier)
 	if invoice and not so.get("b2c_shipping_mail_sent"):
 		# Marello's order_invoiced mail: tracking number plus the invoice for the records.
 		from ecommerce_integrations.b2c.reminders import send_template
@@ -481,7 +478,7 @@ def mark_shipped(sales_order, tracking_number=None, carrier=None):
 	return {
 		"delivered": delivered,
 		"invoice": invoice,
-		"fulfillment": fulfillment,
+		"listeners": listeners,
 		"per_delivered": so.per_delivered,
 		"per_billed": so.per_billed,
 	}

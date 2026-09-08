@@ -126,3 +126,12 @@ def push_fulfillment(so, tracking_number=None, carrier=None):
 	so.db_set(FULFILLMENT_ID_FIELD, fulfillment_id, update_modified=False)
 	log_gate(so, f"Shopify-Fulfillment {fulfillment_id} angelegt ({carrier_name(carrier) or '?'} {tracking_number or ''})")
 	return fulfillment_id
+
+
+def on_shipped(so, tracking_number=None, carrier=None):
+	"""Listener of the channel interface (hook sales_channel_order_shipped): only a Shopify order
+	concerns this module, the others are somebody else's."""
+	if not so.get("shopify_account"):
+		return None
+	# Closes the order in the shop and lets Shopify send its shipping mail (README §2 switch).
+	return push_fulfillment(so, tracking_number=tracking_number, carrier=carrier)

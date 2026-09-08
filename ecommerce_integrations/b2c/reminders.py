@@ -95,8 +95,10 @@ def template_context(so):
 		for row in so.items
 	]
 	ctx = {
-		"order_number": (so.get("shopify_order_number") or so.name).lstrip("#"),
-		"ordered_at": frappe.utils.format_datetime(so.get("shopify_ordered_at") or so.creation, "dd.MM.yyyy HH:mm"),
+		"order_number": (so.get("integration_order_id") or so.get("shopify_order_number") or so.name).lstrip("#"),
+		"ordered_at": frappe.utils.format_datetime(
+			so.get("integration_ordered_at") or so.get("shopify_ordered_at") or so.creation, "dd.MM.yyyy HH:mm"
+		),
 		"grand_total": money(so.grand_total, currency),
 		"net_total": money(so.net_total, currency),
 		"total_taxes": money(so.total_taxes_and_charges, currency),
@@ -134,7 +136,7 @@ def send_template(so, template_name, attachments=None, fallback_subject=None, fa
 		return False
 	# The brand writes to its own customers: sevdesk sends from the channel address
 	# (SevdeskCommand::handleDownloaded reads the sales channel), and so do we. Without a sender on the
-	# channel account the site's default outgoing account applies, as before.
+	# Sales Channel the site's default outgoing account applies, as before.
 	# frappe.sendmail takes one sender string, no separate display name.
 	brand = channel.values(so, "sender_email", "sender_name")
 	sender = brand.get("sender_email") or None

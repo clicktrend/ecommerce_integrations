@@ -61,20 +61,25 @@ class TestApply(unittest.TestCase):
 
 
 class TestChannelValues(unittest.TestCase):
-	"""channel.values() is the one place that knows where per-shop settings live; the callers
+	"""channel.values() reads the Sales Channel of the order (read contract); the callers
 	(revenue account, mail sender) must survive an order without a channel."""
 
 	def test_order_without_a_channel_yields_nothing(self):
 		from ecommerce_integrations.b2c import channel
 
-		self.assertEqual(channel.account_of(frappe._dict()), (None, None))
+		self.assertIsNone(channel.of_order(frappe._dict()))
 		self.assertEqual(channel.values(frappe._dict(), "sender_email"), {})
 
-	def test_amazon_wins_over_shopify_when_both_are_set(self):
+	def test_accounts_come_from_the_sales_channel(self):
+		from unittest import mock
+
 		from ecommerce_integrations.b2c import channel
 
-		so = frappe._dict(amazon_account="Schönschmied", shopify_account="shop.myshopify.com")
-		self.assertEqual(channel.account_of(so), ("Amazon SP Account", "Schönschmied"))
+		sales_channel = frappe._dict(income_account="8402", income_account_at="8320")
+		with mock.patch.object(frappe, "get_cached_doc", return_value=sales_channel) as get:
+			so = frappe._dict(sales_channel="schoenschmied_amazon")
+			self.assertEqual(revenue.channel_accounts(so), ("8402", "8320"))
+		get.assert_called_with("Sales Channel", "schoenschmied_amazon")
 
 
 class TestPaymentGatewayMapping(unittest.TestCase):

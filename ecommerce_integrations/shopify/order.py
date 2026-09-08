@@ -33,6 +33,7 @@ from ecommerce_integrations.shopify.utils import (
 )
 from ecommerce_integrations.utils.price_list import get_dummy_price_list
 from ecommerce_integrations.utils.taxation import get_dummy_tax_category
+from ecommerce_integrations.b2c import channel
 from ecommerce_integrations.b2c.gates import (
 	PAYMENT_GATEWAY_FIELD,
 	PAYMENT_STATUS_FIELD,
@@ -181,8 +182,13 @@ def create_sales_order(shopify_order, setting, company=None):
 				"naming_series": setting.sales_order_series or "SO-SHP-.YYYY.-",
 				ORDER_ID_FIELD: str(shopify_order.get("id")),
 				ORDER_NUMBER_FIELD: shopify_order.get("name"),
-				# Head facts for the freight contract. Shopify has no delivery deadline and no
-				# priority flag - ship_by and is_prio are Amazon concepts and stay empty here.
+				# The channel contract (b2c.channel.CONTRACT_FIELDS) next to the raw Shopify fields.
+				# Shopify knows no deadline and no priority: the deadline stays empty, the priority
+				# is "Normal" until a person (or an express option, one day) raises it.
+				channel.ORDER_FIELD: channel.ensure_for_integration(ACCOUNT_DOCTYPE, setting.name),
+				"integration_order_id": shopify_order.get("name"),
+				"integration_ordered_at": _placed_at(shopify_order.get("created_at")),
+				"integration_priority": channel.PRIORITY_NORMAL,
 				ORDER_ACCOUNT_FIELD: setting.name,
 				ORDER_FINANCIAL_STATUS_FIELD: shopify_order.get("financial_status"),
 				ORDER_PAYMENT_GATEWAY_FIELD: ", ".join(shopify_order.get("payment_gateway_names") or []),

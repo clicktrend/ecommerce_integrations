@@ -7,6 +7,7 @@ Workflow States and Actions, and the Workflow "B2C Auftrag" on Sales Order.
 import frappe
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
+from ecommerce_integrations.b2c import channel
 from ecommerce_integrations.b2c import gates as g
 
 ROLE = "Sales User"
@@ -62,8 +63,105 @@ TRANSITIONS = [
 	(g.STATE_IN_PRODUCTION, "Anhalten", g.STATE_ON_HOLD),
 ]
 
+# Fields renamed on 2026-09-08 (old -> new): copied once by migrate_legacy_fields(), then the old
+# Custom Field is dropped (the column stays; frappe never drops columns).
+LEGACY_FIELDS = {
+	"b2c_payment_status": "integration_payment_status",
+	"b2c_payment_gateway": "integration_payment_gateway",
+}
+
 CUSTOM_FIELDS = {
 	"Sales Order": [
+		# --- the channel contract (b2c.channel.CONTRACT_FIELDS): what every integration writes ---
+		{
+			"fieldname": "integration_section",
+			"label": "Sales Channel",
+			"fieldtype": "Section Break",
+			"insert_after": "po_date",
+			"depends_on": "eval:doc.sales_channel",
+		},
+		{
+			# One filter for every integration (user decision 2026-09-08): the channel, not the
+			# connector account, tells the orders apart in the list.
+			"fieldname": "sales_channel",
+			"label": "Sales Channel",
+			"fieldtype": "Link",
+			"options": "Sales Channel",
+			"insert_after": "integration_section",
+			"read_only": 1,
+			"no_copy": 1,
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+		},
+		{
+			"fieldname": "integration_order_id",
+			"label": "Bestellnummer (Kanal)",
+			"fieldtype": "Data",
+			"insert_after": "sales_channel",
+			"read_only": 1,
+			"no_copy": 1,
+			"search_index": 1,
+		},
+		{
+			"fieldname": "integration_ordered_at",
+			"label": "Bestellt am (Kanal)",
+			"fieldtype": "Datetime",
+			"insert_after": "integration_order_id",
+			"read_only": 1,
+			"no_copy": 1,
+		},
+		{
+			"fieldname": "integration_column",
+			"fieldtype": "Column Break",
+			"insert_after": "integration_ordered_at",
+		},
+		{
+			# Generic priority (user decisions 2026-06-25 and 2026-09-08): Amazon Prime is "High",
+			# a shop's express option or a person may set it too - so it is editable after submit.
+			"fieldname": "integration_priority",
+			"label": "Prio",
+			"fieldtype": "Select",
+			"options": "\nNormal\nHigh",
+			"default": "Normal",
+			"insert_after": "integration_column",
+			"allow_on_submit": 1,
+			"no_copy": 1,
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+		},
+		{
+			"fieldname": "integration_ship_by",
+			"label": "Spätester Versand",
+			"fieldtype": "Datetime",
+			"insert_after": "integration_priority",
+			"allow_on_submit": 1,
+			"no_copy": 1,
+			"in_list_view": 1,
+		},
+		{
+			# Channel neutral payment marker (user decision 2026-09-04, variant B): every channel
+			# writes it - Shopify from financial_status, Amazon as paid on import - and the payment
+			# gate reads it. The gateway becomes the Mode of Payment on the invoice later.
+			"fieldname": "integration_payment_status",
+			"label": "Zahlstatus",
+			"fieldtype": "Select",
+			"options": "\nOffen\nBezahlt\nTeilweise erstattet\nErstattet",
+			"insert_after": "integration_ship_by",
+			"read_only": 1,
+			"allow_on_submit": 1,
+			"no_copy": 1,
+			"in_standard_filter": 1,
+		},
+		{
+			"fieldname": "integration_payment_gateway",
+			"label": "Zahlungsweg",
+			"fieldtype": "Data",
+			"insert_after": "integration_payment_status",
+			"read_only": 1,
+			"allow_on_submit": 1,
+			"no_copy": 1,
+		},
+		# --- the workflow's own bookkeeping ---
 		{
 			"fieldname": "b2c_workflow_section",
 			"label": "B2C-Workflow",
@@ -72,31 +170,10 @@ CUSTOM_FIELDS = {
 			"collapsible": 1,
 		},
 		{
-			# Channel neutral payment marker (user decision 2026-09-04, variant B): every channel
-			# writes it - Shopify from financial_status, Amazon as paid on import - and the payment
-			# gate reads it. The gateway becomes the Mode of Payment on the invoice later.
-			"fieldname": "b2c_payment_status",
-			"label": "Zahlstatus",
-			"fieldtype": "Select",
-			"options": "\nOffen\nBezahlt\nTeilweise erstattet\nErstattet",
-			"insert_after": "b2c_workflow_section",
-			"read_only": 1,
-			"allow_on_submit": 1,
-			"in_standard_filter": 1,
-		},
-		{
-			"fieldname": "b2c_payment_gateway",
-			"label": "Zahlungsweg",
-			"fieldtype": "Data",
-			"insert_after": "b2c_payment_status",
-			"read_only": 1,
-			"allow_on_submit": 1,
-		},
-		{
 			"fieldname": "b2c_payment_request_sent",
 			"label": "Zahlungsaufforderung gesendet",
 			"fieldtype": "Check",
-			"insert_after": "b2c_payment_gateway",
+			"insert_after": "b2c_workflow_section",
 			"read_only": 1,
 			"allow_on_submit": 1,
 		},
@@ -294,11 +371,27 @@ def ensure_workflow():
 	return "created"
 
 
+def migrate_legacy_fields():
+	"""Copy the renamed fields once (LEGACY_FIELDS), then drop the old Custom Field definitions."""
+	copied = {}
+	for old, new in LEGACY_FIELDS.items():
+		if not frappe.db.exists("Custom Field", f"Sales Order-{old}"):
+			continue
+		if frappe.db.has_column("Sales Order", old) and frappe.db.has_column("Sales Order", new):
+			pending = f"ifnull(`{new}`, '') = '' and ifnull(`{old}`, '') <> ''"
+			copied[old] = frappe.db.sql(f"select count(*) from `tabSales Order` where {pending}")[0][0]
+			frappe.db.sql(f"update `tabSales Order` set `{new}` = `{old}` where {pending}")
+		frappe.delete_doc("Custom Field", f"Sales Order-{old}", ignore_permissions=True, force=True)
+	if copied:
+		frappe.clear_cache(doctype="Sales Order")
+	return copied
+
+
 def backfill_payment_status():
 	"""Shopify orders created before the marker existed: derive it from the financial status."""
 	rows = frappe.get_all(
 		"Sales Order",
-		filters={"shopify_financial_status": ["is", "set"], "b2c_payment_status": ["in", ["", None]]},
+		filters={"shopify_financial_status": ["is", "set"], g.PAYMENT_STATUS_FIELD: ["in", ["", None]]},
 		fields=["name", "shopify_financial_status", "shopify_payment_gateway"],
 	)
 	for row in rows:
@@ -306,19 +399,64 @@ def backfill_payment_status():
 			"Sales Order",
 			row.name,
 			{
-				"b2c_payment_status": g.payment_status_from_financial(row.shopify_financial_status),
-				"b2c_payment_gateway": row.shopify_payment_gateway or "",
+				g.PAYMENT_STATUS_FIELD: g.payment_status_from_financial(row.shopify_financial_status),
+				g.PAYMENT_GATEWAY_FIELD: row.shopify_payment_gateway or "",
 			},
 			update_modified=False,
 		)
 	return len(rows)
 
 
-def install():
+def backfill_shopify_orders():
+	"""Shopify orders from before the channel contract: channel, shop number and order time from the
+	Shopify fields. (The Amazon app backfills its own orders in its after_migrate.)"""
+	rows = frappe.get_all(
+		"Sales Order",
+		filters={"shopify_account": ["is", "set"], channel.ORDER_FIELD: ["in", ["", None]]},
+		fields=["name", "shopify_account", "shopify_order_number", "shopify_ordered_at", "integration_priority"],
+	)
+	for row in rows:
+		frappe.db.set_value(
+			"Sales Order",
+			row.name,
+			{
+				channel.ORDER_FIELD: channel.ensure_for_integration("Shopify Account", row.shopify_account),
+				"integration_order_id": row.shopify_order_number,
+				"integration_ordered_at": row.shopify_ordered_at,
+				"integration_priority": row.integration_priority or channel.PRIORITY_NORMAL,
+			},
+			update_modified=False,
+		)
+	return len(rows)
+
+
+def after_migrate():
+	"""Fields, renames, channels and backfills - everything a deploy needs besides the workflow
+	itself (that one rewrites states and stays a deliberate `install`)."""
+	if not frappe.db.table_exists("Sales Channel"):
+		# Seen 2026-09-08: the first migrate after a module was added to modules.txt ran with the
+		# module map still cached, so the DocType was not synced and the site was left half done.
+		frappe.throw(
+			"DocType 'Sales Channel' wurde nicht synchronisiert (Modul-Cache veraltet): "
+			"`bench --site <site> clear-cache` und `bench --site <site> migrate` erneut ausführen."
+		)
 	create_custom_fields(CUSTOM_FIELDS, update=True)
-	backfilled = backfill_payment_status()
-	if backfilled:
-		print(f"b2c workflow: payment status derived for {backfilled} existing orders")
+	from ecommerce_integrations.shopify.doctype.shopify_account.shopify_account import setup_custom_fields
+
+	if frappe.db.exists("Shopify Account"):
+		setup_custom_fields()  # the Shopify fields lost their list filter flag on 2026-09-08
+	copied = migrate_legacy_fields()
+	channels = channel.ensure_channels_for_existing_accounts()
+	payments = backfill_payment_status()
+	orders = backfill_shopify_orders()
+	print(
+		f"b2c: renamed fields {copied or '-'}; sales channels created {channels or '-'}; "
+		f"payment status derived for {payments}; channel contract backfilled on {orders} Shopify orders"
+	)
+
+
+def install():
+	after_migrate()
 	ensure_multisizer_item()
 	ensure_states()
 	ensure_actions()

@@ -33,21 +33,21 @@ class TestGatesPure(unittest.TestCase):
 		self.assertTrue(gates.is_paid(shopify))
 		shopify.shopify_financial_status = "partially_refunded"
 		self.assertTrue(gates.is_paid(shopify))
-		# not a Shopify order (manual, Amazon later): payment is not B2C's gate here
+		# no marker and no raw status (manual order): payment is not B2C's gate here
 		self.assertTrue(gates.is_paid(frappe._dict(grand_total=29.0, shopify_account=None)))
 		# zero total never waits for money
 		self.assertTrue(gates.is_paid(frappe._dict(grand_total=0, shopify_account="acc", shopify_financial_status="pending")))
 
 	def test_payment_marker_wins_over_channel_status(self):
-		# The channel neutral marker (b2c_payment_status) is what every channel writes; once it is
-		# set, the raw Shopify status no longer decides, and a non-Shopify order can be unpaid.
-		so = frappe._dict(grand_total=29.0, shopify_account="acc", shopify_financial_status="pending", b2c_payment_status="Bezahlt")
+		# The channel neutral marker (integration_payment_status) is what every channel writes; once
+		# it is set, the raw Shopify status no longer decides, and a non-Shopify order can be unpaid.
+		so = frappe._dict(grand_total=29.0, shopify_account="acc", shopify_financial_status="pending", integration_payment_status="Bezahlt")
 		self.assertTrue(gates.is_paid(so))
-		so.b2c_payment_status = "Teilweise erstattet"
+		so.integration_payment_status = "Teilweise erstattet"
 		self.assertTrue(gates.is_paid(so))
-		so.b2c_payment_status = "Erstattet"
+		so.integration_payment_status = "Erstattet"
 		self.assertFalse(gates.is_paid(so))
-		self.assertFalse(gates.is_paid(frappe._dict(grand_total=29.0, shopify_account=None, b2c_payment_status="Offen")))
+		self.assertFalse(gates.is_paid(frappe._dict(grand_total=29.0, shopify_account=None, integration_payment_status="Offen")))
 
 	def test_financial_status_mapping(self):
 		self.assertEqual(gates.payment_status_from_financial("paid"), "Bezahlt")
