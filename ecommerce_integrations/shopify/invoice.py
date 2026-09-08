@@ -2,10 +2,11 @@ import frappe
 from erpnext.selling.doctype.sales_order.sales_order import make_sales_invoice
 from frappe.utils import cint, cstr, getdate, nowdate
 
+from ecommerce_integrations.shopify import events
 from ecommerce_integrations.shopify.constants import (
+	ORDER_FINANCIAL_STATUS_FIELD,
 	ORDER_ID_FIELD,
 	ORDER_NUMBER_FIELD,
-	# SETTING_DOCTYPE,
 )
 from ecommerce_integrations.shopify.utils import create_shopify_log, get_user_shopify_account
 
@@ -26,12 +27,12 @@ def prepare_sales_invoice(payload, request_id=None, shopify_account=None):
 		sales_order = get_sales_order(cstr(order["id"]))
 		shopify_account_name = shopify_account.name if shopify_account else None
 		if sales_order:
-			# B2C workflow: the payment is the first gate - record the status on the order and
-			# re-run the gates before (optionally) invoicing. The invoice itself stays behind
+			# Record the shop's payment status on the order and tell listeners (the B2C workflow
+			# re-runs its gates) before (optionally) invoicing. The invoice itself stays behind
 			# the account's sync_sales_invoice switch (decision: invoice at shipping).
-			from ecommerce_integrations.b2c.gates import mark_paid
-
-			mark_paid(sales_order.name, order.get("financial_status") or "paid")
+			status = order.get("financial_status") or "paid"
+			sales_order.db_set(ORDER_FINANCIAL_STATUS_FIELD, status, update_modified=False)
+			events.emit(events.FINANCIAL_STATUS_CHANGED, sales_order.name, order, shopify_account_name)
 			create_sales_invoice(order, shopify_account, sales_order)
 			create_shopify_log(status="Success", shopify_account=shopify_account_name)
 		else:

@@ -29,8 +29,9 @@ class TestExternalIdFields(unittest.TestCase):
 		for doctype in ("Sales Invoice", "Delivery Note"):
 			self.assertFalse(field(doctype, ORDER_ID_FIELD).get("unique"))
 
-	def test_sales_order_account_is_a_standard_filter(self):
-		# Two shops under one company: the account link is what tells the orders apart in the list.
+	def test_sales_order_account_is_a_raw_link_not_a_list_filter(self):
+		# The account link stays the raw connector reference; since 2026-09-08 the list filters on
+		# the channel neutral `sales_channel` of the B2C app instead (one filter for every shop).
 		definition = field("Sales Order", ORDER_ACCOUNT_FIELD)
 		self.assertEqual(definition["fieldtype"], "Link")
-		self.assertEqual(definition.get("in_standard_filter"), 1)
+		self.assertFalse(definition.get("in_standard_filter"))

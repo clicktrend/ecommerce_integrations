@@ -6,12 +6,13 @@ sync_sales_order() the webhook would call, known ones get the payment status and
 cancellation applied. It never saves the Shopify Account document - saving with
 `enable_shopify = 1` registers webhooks that would point at the dev host (README §1).
 
-Reads only. Payment changes only move the B2C state (no invoice at payment: the invoice is
-made at shipping, decision 2026-09-03). Cursor: a global default value per account.
+Reads only. A payment change updates the raw status and raises `financial_status_changed`
+(shopify.events); what follows - the B2C gates, no invoice before shipping (decision
+2026-09-03) - is the listener's business. Cursor: a global default value per account.
 
 Run periodically (no scheduler on the dev bench):
-    bench --site b2c.local execute ecommerce_integrations.b2c.live_pull.pull
-    bench --site b2c.local execute ecommerce_integrations.b2c.live_pull.pull --kwargs "{'minutes': 180}"
+    bench --site b2c.local execute ecommerce_integrations.shopify.live_pull.pull
+    bench --site b2c.local execute ecommerce_integrations.shopify.live_pull.pull --kwargs "{'minutes': 180}"
 
 Without an account every enabled Shopify Account is pulled in turn, each with its own cursor
 (user decision 2026-09-07: all shops run permanently); one shop failing does not stop the next.
@@ -23,7 +24,13 @@ from datetime import datetime, timedelta, timezone
 import frappe
 from frappe.utils import cstr, get_datetime
 
-from ecommerce_integrations.shopify.constants import ACCOUNT_DOCTYPE, EVENT_MAPPER, ORDER_ID_FIELD
+from ecommerce_integrations.shopify import events
+from ecommerce_integrations.shopify.constants import (
+	ACCOUNT_DOCTYPE,
+	EVENT_MAPPER,
+	ORDER_FINANCIAL_STATUS_FIELD,
+	ORDER_ID_FIELD,
+)
 from ecommerce_integrations.shopify.utils import create_shopify_log
 
 DEFAULT_WINDOW_MINUTES = 60
@@ -70,7 +77,6 @@ def apply_order(order, setting, window_start=None):
 	"""One shop order: sync it, or apply what changed on the known sales order. Orders created
 	before the parity window only count as `old`: an update (fulfilment, payout) on an order
 	the shop shipped weeks ago must not start a dev production run."""
-	from ecommerce_integrations.b2c import gates
 	from ecommerce_integrations.shopify.order import cancel_order, sync_sales_order
 
 	order_id = cstr(order.get("id"))
@@ -108,7 +114,8 @@ def apply_order(order, setting, window_start=None):
 
 	status = order.get("financial_status")
 	if status and status != existing.shopify_financial_status:
-		gates.mark_paid(existing.name, status)
+		frappe.db.set_value("Sales Order", existing.name, ORDER_FINANCIAL_STATUS_FIELD, status, update_modified=False)
+		events.emit(events.FINANCIAL_STATUS_CHANGED, existing.name, order, setting)
 		return "payment"
 
 	return "unchanged"

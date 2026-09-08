@@ -3,4 +3,3 @@ shopify
 Zenoti
 unicommerce
 Amazon
-B2C

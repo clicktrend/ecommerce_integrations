@@ -8,7 +8,7 @@ blocks every template. The result was invoices without a single tax row.
 ERPNext attaches the company default and Tax Rules in the form JS only, so a document created on the
 server carries no taxes unless the creator resolves them. This is that resolver. It is a deliberate
 twin of erpnext_amazon_sp.sync.sales_order.tax_template_for - same rule order, same reasoning - kept
-here so the fork does not depend on the Amazon app being installed.
+here in the connector so it does not depend on any other app being installed.
 """
 
 import frappe
