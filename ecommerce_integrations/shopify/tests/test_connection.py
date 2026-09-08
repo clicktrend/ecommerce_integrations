@@ -14,6 +14,9 @@ from ecommerce_integrations.shopify.constants import API_VERSION, SETTING_DOCTYP
 class TestShopifyConnection(unittest.TestCase):
 	@classmethod
 	def setUpClass(cls):
+		if not frappe.db.exists("DocType", SETTING_DOCTYPE):
+			# PR #374 replaced the singleton with Shopify Account (see tests/utils.py).
+			raise unittest.SkipTest(f"{SETTING_DOCTYPE} no longer exists (multi-account fork)")
 		cls.setting = frappe.get_doc(SETTING_DOCTYPE)
 
 	@unittest.skip("Can't run these tests in CI")

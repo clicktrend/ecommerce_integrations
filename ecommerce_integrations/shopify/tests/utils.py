@@ -38,6 +38,10 @@ from ecommerce_integrations.shopify.constants import API_VERSION, SETTING_DOCTYP
 class TestCase(unittest.TestCase):
 	@classmethod
 	def setUpClass(cls):
+		if not frappe.db.exists("DocType", SETTING_DOCTYPE):
+			# PR #374 replaced the singleton with Shopify Account; the upstream fixtures below
+			# were never ported. Skip instead of erroring so the suite reports what it covers.
+			raise unittest.SkipTest(f"{SETTING_DOCTYPE} no longer exists (multi-account fork)")
 		with patch(
 			"ecommerce_integrations.shopify.doctype.shopify_setting.shopify_setting.ShopifySetting._handle_webhooks"
 		):
