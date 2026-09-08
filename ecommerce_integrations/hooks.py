@@ -73,6 +73,16 @@ doctype_js = {
 # before_install = "ecommerce_integrations.install.before_install"
 # after_install = "ecommerce_integrations.install.after_install"
 
+# Shopify: keep the Sales Order custom fields current on sites with an account, and carry the
+# field that moved here from the B2C app (2026-09-08).
+after_migrate = "ecommerce_integrations.shopify.doctype.shopify_account.shopify_account.after_migrate"
+
+# Sales channel interface of the B2C app (erpnext_b2c): this connector registers the account
+# DocType it keeps its per-shop settings on, and listens for shipped orders to close them in the
+# shop. Hook names only - nothing here imports that app, and without it both entries are inert.
+sales_channel_integrations = {"Shopify Account": {"channel_type": "Webshop"}}
+sales_channel_order_shipped = ["ecommerce_integrations.shopify.fulfillment_push.on_shipped"]
+
 
 before_uninstall = "ecommerce_integrations.uninstall.before_uninstall"
 
@@ -118,8 +128,6 @@ doc_events = {
 	"Sales Order": {
 		"on_update_after_submit": [
 			"ecommerce_integrations.unicommerce.order.update_shipping_info",
-			# B2C workflow: a manual action back to "Offen" re-runs the gates
-			"ecommerce_integrations.b2c.gates.on_update_after_submit",
 		],
 		"on_cancel": "ecommerce_integrations.unicommerce.status_updater.ignore_pick_list_on_sales_order_cancel",
 	},
@@ -144,18 +152,11 @@ scheduler_events = {
 		# Updated to use multi-tenant inventory sync
 		"ecommerce_integrations.shopify.inventory.update_inventory_on_shopify"
 	],
-	"daily": [
-		# B2C workflow: payment reminders after 14 days (staff handbook cadence)
-		"ecommerce_integrations.b2c.reminders.send_due_reminders",
-		# Personalization raw store TTL (PII concept K0): 30 days after shipment, 90 without one.
-		"ecommerce_integrations.b2c.personalization_files.purge_expired",
-	],
+	"daily": [],
 	"daily_long": ["ecommerce_integrations.zenoti.doctype.zenoti_settings.zenoti_settings.sync_stocks"],
 	"hourly": [
 		# Updated to use multi-tenant old orders sync
 		"ecommerce_integrations.shopify.order.sync_old_orders",
-		# Personalization files whose download failed get another try for a week.
-		"ecommerce_integrations.b2c.personalization_files.retry_pending",
 		"ecommerce_integrations.amazon.doctype.amazon_sp_api_settings.amazon_sp_api_settings.schedule_get_order_details",
 	],
 	"hourly_long": [

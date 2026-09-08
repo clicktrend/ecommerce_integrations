@@ -23,7 +23,7 @@ EVENT_MAPPER = {
 	"orders/paid": "ecommerce_integrations.shopify.invoice.prepare_sales_invoice",
 	"orders/fulfilled": "ecommerce_integrations.shopify.fulfillment.prepare_delivery_note",
 	"orders/cancelled": "ecommerce_integrations.shopify.order.cancel_order",
-	"refunds/create": "ecommerce_integrations.b2c.returns.prepare_credit_note",
+	"refunds/create": "ecommerce_integrations.shopify.refund.process_refund",
 	"orders/partially_fulfilled": "ecommerce_integrations.shopify.fulfillment.prepare_delivery_note",
 }
 
@@ -41,6 +41,8 @@ ORDER_ACCOUNT_FIELD = "shopify_account"
 ORDER_FINANCIAL_STATUS_FIELD = "shopify_financial_status"
 ORDER_PAYMENT_GATEWAY_FIELD = "shopify_payment_gateway"
 ORDER_PLACED_AT_FIELD = "shopify_ordered_at"
+# Fulfillment this connector created in the shop when the order shipped (fulfillment_push).
+ORDER_FULFILLMENT_ID_FIELD = "shopify_fulfillment_id"
 FULLFILLMENT_ID_FIELD = "shopify_fulfillment_id"
 SUPPLIER_ID_FIELD = "shopify_supplier_id"
 ADDRESS_ID_FIELD = "shopify_address_id"

@@ -7,6 +7,7 @@ from frappe.utils import cint, cstr, flt, get_datetime, getdate, nowdate
 from shopify.collection import PaginatedIterator
 from shopify.resources import Order
 
+from ecommerce_integrations.shopify import events
 from ecommerce_integrations.shopify.connection import get_temp_session_context
 from ecommerce_integrations.shopify.constants import (
 	CUSTOMER_ID_FIELD,
@@ -33,11 +34,6 @@ from ecommerce_integrations.shopify.utils import (
 )
 from ecommerce_integrations.utils.price_list import get_dummy_price_list
 from ecommerce_integrations.utils.taxation import get_dummy_tax_category
-from ecommerce_integrations.b2c.gates import (
-	PAYMENT_GATEWAY_FIELD,
-	PAYMENT_STATUS_FIELD,
-	payment_status_from_financial,
-)
 
 DEFAULT_TAX_FIELDS = {
 	"sales_tax": "default_sales_tax_account",
@@ -105,11 +101,9 @@ def create_order(order, setting, company=None):
 		if order.get("fulfillments"):
 			create_delivery_note(order, setting, so)
 
-		# Local copies of the photos / renders the properties link to (K0 raw store). Runs once
-		# per order and never raises - the import must not depend on the shop's CDN.
-		from ecommerce_integrations.b2c.personalization_files import after_import
-
-		after_import(so.name)
+		# Other apps react to the new order through the hook in shopify.events (the B2C workflow
+		# fetches the personalization files, for one).
+		events.emit(events.ORDER_CREATED, so.name, order, setting)
 
 
 def _placed_at(value):
@@ -181,14 +175,11 @@ def create_sales_order(shopify_order, setting, company=None):
 				"naming_series": setting.sales_order_series or "SO-SHP-.YYYY.-",
 				ORDER_ID_FIELD: str(shopify_order.get("id")),
 				ORDER_NUMBER_FIELD: shopify_order.get("name"),
-				# Head facts for the freight contract. Shopify has no delivery deadline and no
-				# priority flag - ship_by and is_prio are Amazon concepts and stay empty here.
+				# Head facts of the shop order, raw. Whatever a workflow app derives from them (the
+				# B2C sales channel contract) happens in that app's own Sales Order hooks.
 				ORDER_ACCOUNT_FIELD: setting.name,
 				ORDER_FINANCIAL_STATUS_FIELD: shopify_order.get("financial_status"),
 				ORDER_PAYMENT_GATEWAY_FIELD: ", ".join(shopify_order.get("payment_gateway_names") or []),
-				# Channel neutral marker next to the raw Shopify status (b2c.gates reads the marker).
-				PAYMENT_STATUS_FIELD: payment_status_from_financial(shopify_order.get("financial_status")),
-				PAYMENT_GATEWAY_FIELD: ", ".join(shopify_order.get("payment_gateway_names") or []),
 				ORDER_PLACED_AT_FIELD: _placed_at(shopify_order.get("created_at")),
 				"customer": customer,
 				"transaction_date": getdate(shopify_order.get("created_at")) or nowdate(),
@@ -209,13 +200,13 @@ def create_sales_order(shopify_order, setting, company=None):
 		if taxes:
 			so.tax_category = get_dummy_tax_category()
 		else:
-			from ecommerce_integrations.b2c import taxes as b2c_taxes
+			from ecommerce_integrations.shopify import taxes as shop_taxes
 
 			shipping_country = (shopify_order.get("shipping_address") or {}).get("country")
-			template = b2c_taxes.template_for(so.company, shipping_country)
+			template = shop_taxes.template_for(so.company, shipping_country)
 			if template:
 				so.taxes_and_charges = template
-				for row in b2c_taxes.rows_of(template):
+				for row in shop_taxes.rows_of(template):
 					so.append("taxes", row)
 
 		if company:

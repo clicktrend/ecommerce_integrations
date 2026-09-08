@@ -6,7 +6,7 @@ from unittest import mock
 
 import frappe
 
-from ecommerce_integrations.b2c import live_pull
+from ecommerce_integrations.shopify import live_pull
 from ecommerce_integrations.shopify import product
 
 

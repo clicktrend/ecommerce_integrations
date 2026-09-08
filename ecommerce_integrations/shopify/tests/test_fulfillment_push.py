@@ -1,6 +1,6 @@
 import unittest
 
-from ecommerce_integrations.b2c import shopify_fulfillment as sf
+from ecommerce_integrations.shopify import fulfillment_push as sf
 
 
 class TestCarrierNames(unittest.TestCase):

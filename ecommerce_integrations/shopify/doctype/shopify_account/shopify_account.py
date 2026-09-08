@@ -31,6 +31,7 @@ from ecommerce_integrations.shopify.constants import (
 	ORDER_ITEM_PERSONALIZATION_SECTION,
 	ORDER_ITEM_PERSONALIZED_FIELD,
 	ORDER_ITEM_PROPERTIES_FIELD,
+	ORDER_FULFILLMENT_ID_FIELD,
 	ORDER_NUMBER_FIELD,
 	ORDER_PAYMENT_GATEWAY_FIELD,
 	ORDER_PLACED_AT_FIELD,
@@ -326,8 +327,8 @@ def get_custom_fields():
 				read_only=1,
 				print_hide=1,
 			),
-			# Standard filter: with two shops under one company the account is the only field
-			# that tells the orders apart in the list (the naming series changed twice).
+			# Raw connector field; the list filters on the channel neutral `sales_channel`
+			# (b2c.channel) since 2026-09-08, so no standard filter here.
 			dict(
 				fieldname=ORDER_ACCOUNT_FIELD,
 				label="Shopify Account",
@@ -336,7 +337,7 @@ def get_custom_fields():
 				insert_after=ORDER_STATUS_FIELD,
 				read_only=1,
 				print_hide=1,
-				in_standard_filter=1,
+				in_standard_filter=0,
 			),
 			dict(
 				fieldname=ORDER_FINANCIAL_STATUS_FIELD,
@@ -361,6 +362,16 @@ def get_custom_fields():
 				insert_after=ORDER_PAYMENT_GATEWAY_FIELD,
 				read_only=1,
 				print_hide=1,
+			),
+			dict(
+				fieldname=ORDER_FULFILLMENT_ID_FIELD,
+				label="Shopify Fulfillment Id",
+				fieldtype="Data",
+				insert_after=ORDER_PLACED_AT_FIELD,
+				read_only=1,
+				print_hide=1,
+				allow_on_submit=1,
+				description="Fulfillment created in the shop when the order shipped (fulfillment_push).",
 			),
 		],
 		"Sales Order Item": [
@@ -481,6 +492,27 @@ def get_custom_fields():
 		custom_fields.setdefault(doctype, []).append(company_field)
 
 	return custom_fields
+
+
+# Fields that moved into this connector from the B2C app (2026-09-08): copied once, old definition dropped.
+LEGACY_ORDER_FIELDS = {"b2c_shopify_fulfillment_id": ORDER_FULFILLMENT_ID_FIELD}
+
+
+def after_migrate():
+	"""Keep the custom fields current on a site that has an account (they used to be created on
+	account save only) and carry the renamed field over."""
+	if not frappe.db.count("Shopify Account"):
+		return
+	setup_custom_fields()
+	for old, new in LEGACY_ORDER_FIELDS.items():
+		if not frappe.db.exists("Custom Field", f"Sales Order-{old}"):
+			continue
+		if frappe.db.has_column("Sales Order", old) and frappe.db.has_column("Sales Order", new):
+			frappe.db.sql(
+				f"update `tabSales Order` set `{new}` = `{old}` where ifnull(`{new}`, '') = '' and ifnull(`{old}`, '') <> ''"
+			)
+		frappe.delete_doc("Custom Field", f"Sales Order-{old}", ignore_permissions=True, force=True)
+	frappe.clear_cache(doctype="Sales Order")
 
 
 def setup_custom_fields():

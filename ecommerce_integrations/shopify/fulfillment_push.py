@@ -13,9 +13,13 @@ on the sales order, and fulfillment orders the shop already closed are left alon
 import frappe
 from frappe.utils import cint
 
-from ecommerce_integrations.shopify.constants import ORDER_ID_FIELD
+from ecommerce_integrations.shopify.constants import ORDER_FULFILLMENT_ID_FIELD, ORDER_ID_FIELD
 
-FULFILLMENT_ID_FIELD = "b2c_shopify_fulfillment_id"
+FULFILLMENT_ID_FIELD = ORDER_FULFILLMENT_ID_FIELD
+
+
+def _note(so, text):
+	so.add_comment("Info", f"Shopify: {text}")
 
 # Oro/Marello shipping method codes -> the carrier name Shopify shows the customer (tracking link).
 CARRIERS = {
@@ -87,8 +91,6 @@ def push_fulfillment(so, tracking_number=None, carrier=None):
 	"""Create the Shopify fulfillment for a shipped B2C order. Returns the fulfillment id, or
 	None with the reason logged on the order. Never raises: the shipment bookkeeping in
 	ERPNext must not depend on the shop."""
-	from ecommerce_integrations.b2c.gates import log_gate
-
 	order_id = so.get(ORDER_ID_FIELD)
 	account_name = so.get("shopify_account")
 	if not order_id or not account_name:
@@ -98,7 +100,7 @@ def push_fulfillment(so, tracking_number=None, carrier=None):
 
 	account = frappe.get_doc("Shopify Account", account_name)
 	if not cint(account.get("sync_delivery_note")):
-		log_gate(so, "Shopify-Fulfillment übersprungen: Schalter „sync_delivery_note“ ist aus")
+		_note(so, "Shopify-Fulfillment übersprungen: Schalter „sync_delivery_note“ ist aus")
 		return None
 
 	try:
@@ -110,7 +112,7 @@ def push_fulfillment(so, tracking_number=None, carrier=None):
 			fulfillment_orders = [fo.to_dict() for fo in shopify.FulfillmentOrders.find(order_id=order_id)]
 			payload = fulfillment_payload(fulfillment_orders, tracking_number, carrier)
 			if payload is None:
-				log_gate(so, "Shopify-Fulfillment: im Shop ist nichts mehr offen (bereits erfüllt)")
+				_note(so, "Shopify-Fulfillment: im Shop ist nichts mehr offen (bereits erfüllt)")
 				so.db_set(FULFILLMENT_ID_FIELD, "already-fulfilled", update_modified=False)
 				return None
 			fulfillment = shopify.FulfillmentV2(payload)
@@ -120,9 +122,18 @@ def push_fulfillment(so, tracking_number=None, carrier=None):
 			fulfillment_id = str(fulfillment.id)
 	except Exception as exc:  # the shop must never roll back the shipment
 		frappe.log_error(title=f"B2C Shopify fulfillment for {so.name}", message=frappe.get_traceback())
-		log_gate(so, f"Shopify-Fulfillment NICHT angelegt: {exc}")
+		_note(so, f"Shopify-Fulfillment NICHT angelegt: {exc}")
 		return None
 
 	so.db_set(FULFILLMENT_ID_FIELD, fulfillment_id, update_modified=False)
-	log_gate(so, f"Shopify-Fulfillment {fulfillment_id} angelegt ({carrier_name(carrier) or '?'} {tracking_number or ''})")
+	_note(so, f"Shopify-Fulfillment {fulfillment_id} angelegt ({carrier_name(carrier) or '?'} {tracking_number or ''})")
 	return fulfillment_id
+
+
+def on_shipped(so, tracking_number=None, carrier=None):
+	"""Listener registered under the B2C app's hook `sales_channel_order_shipped` (a name, no
+	import): only a Shopify order concerns this module, the others are somebody else's."""
+	if not so.get("shopify_account"):
+		return None
+	# Closes the order in the shop and lets Shopify send its shipping mail (README §2 switch).
+	return push_fulfillment(so, tracking_number=tracking_number, carrier=carrier)

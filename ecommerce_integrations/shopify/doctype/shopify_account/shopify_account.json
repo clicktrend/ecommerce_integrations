@@ -29,11 +29,6 @@
   "cash_bank_account",
   "column_break_19",
   "cost_center",
-  "income_account",
-  "income_account_at",
-  "sender_email",
-  "sender_name",
-  "brand_logo",
   "section_break_25",
   "sales_order_series",
   "delivery_note_series",
@@ -229,39 +224,6 @@
    "label": "Cost Center",
    "mandatory_depends_on": "eval:doc.enable_shopify",
    "options": "Cost Center"
-  },
-  {
-   "fieldname": "income_account",
-   "fieldtype": "Link",
-   "label": "Income Account",
-   "options": "Account",
-   "description": "Revenue account of this shop's brand. The invoice stage writes it on every line, because an item sold on two channels cannot carry the brand on its Item Default."
-  },
-  {
-   "fieldname": "income_account_at",
-   "fieldtype": "Link",
-   "label": "Income Account (Austria)",
-   "options": "Account",
-   "description": "Revenue account for deliveries to Austria (tax advisor 2026-09-04: account 8320). Falls back to the income account above when empty."
-  },
-  {
-   "fieldname": "sender_email",
-   "fieldtype": "Data",
-   "options": "Email",
-   "label": "Sender (E-Mail)",
-   "description": "From address of the customer mails of this shop. Empty falls back to the site's default outgoing account - then every brand writes from the same address."
-  },
-  {
-   "fieldname": "sender_name",
-   "fieldtype": "Data",
-   "label": "Sender (Name)",
-   "description": "Name shown next to the sender address, e.g. the brand."
-  },
-  {
-   "fieldname": "brand_logo",
-   "fieldtype": "Attach Image",
-   "label": "Brand Logo",
-   "description": "Shown on the invoice of this shop. Empty falls back to the sender name in type."
   },
   {
    "fieldname": "section_break_25",
@@ -479,7 +441,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 0,
  "links": [],
- "modified": "2024-01-01 00:00:00.000000",
+ "modified": "2026-09-08 09:10:00.000000",
  "modified_by": "Administrator",
  "module": "shopify",
  "name": "Shopify Account",
