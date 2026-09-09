@@ -16,6 +16,7 @@ from ecommerce_integrations.shopify.constants import (
 	ORDER_ITEM_DISCOUNT_FIELD,
 	ORDER_ITEM_PERSONALIZED_FIELD,
 	ORDER_ITEM_PROPERTIES_FIELD,
+	ORDER_ITEM_SKU_FIELD,
 	ORDER_ACCOUNT_FIELD,
 	ORDER_FINANCIAL_STATUS_FIELD,
 	ORDER_NUMBER_FIELD,
@@ -272,6 +273,7 @@ def get_order_items(order_items, setting, delivery_date, taxes_inclusive):
 					),
 					ORDER_ITEM_PROPERTIES_FIELD: _get_item_properties(shopify_item),
 					ORDER_ITEM_PERSONALIZED_FIELD: _is_personalized(shopify_item),
+					ORDER_ITEM_SKU_FIELD: cstr(shopify_item.get("sku")).strip() or None,
 				}
 			)
 		else:

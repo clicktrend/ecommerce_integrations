@@ -116,3 +116,17 @@ class TestItemGroupAndDefaults(unittest.TestCase):
 		self.assertEqual(captured["taxes"], [{"item_tax_template": "DE 19"}])
 		self.assertEqual(captured["custom_pim_missing"], 1)
 		self.assertEqual(captured["item_group"], "Ringe")
+
+
+class TestSoldSkuOnTheLine(unittest.TestCase):
+	def test_get_order_items_writes_the_sold_sku(self):
+		from ecommerce_integrations.shopify import order as order_module
+
+		line = {"product_exists": True, "product_id": 111, "variant_id": 222, "sku": " 105HDla ", "name": "Feliz", "quantity": 1, "price": "29.90", "properties": []}
+		with patch.object(order_module, "get_item_code", return_value="RP105HD"), patch.object(order_module, "_get_item_price", return_value=29.9), patch.object(
+			order_module, "_get_total_discount", return_value=0
+		):
+			items = order_module.get_order_items([line], _setting(), "2026-09-10", taxes_inclusive=True)
+		self.assertEqual(items[0]["item_code"], "RP105HD")
+		self.assertEqual(items[0]["shopify_sku"], "105HDla")
+
