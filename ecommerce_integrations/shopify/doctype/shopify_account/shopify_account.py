@@ -31,6 +31,7 @@ from ecommerce_integrations.shopify.constants import (
 	ORDER_ITEM_PERSONALIZATION_SECTION,
 	ORDER_ITEM_PERSONALIZED_FIELD,
 	ORDER_ITEM_PROPERTIES_FIELD,
+	ORDER_ITEM_SKU_FIELD,
 	ORDER_FULFILLMENT_ID_FIELD,
 	ORDER_NUMBER_FIELD,
 	ORDER_PAYMENT_GATEWAY_FIELD,
@@ -412,6 +413,15 @@ def get_custom_fields():
 				print_hide=1,
 				in_list_view=0,
 				columns=0,
+			),
+			dict(
+				fieldname=ORDER_ITEM_SKU_FIELD,
+				label="Shopify SKU (verkauft)",
+				fieldtype="Data",
+				insert_after=ORDER_ITEM_PROPERTIES_FIELD,
+				read_only=1,
+				print_hide=1,
+				no_copy=1,
 			),
 		],
 		"Delivery Note": [

@@ -17,6 +17,61 @@ from ecommerce_integrations.shopify.constants import (
 )
 from ecommerce_integrations.shopify.utils import create_shopify_log, get_company_shopify_account, get_user_shopify_account
 
+# The hub's item mapper (the B2C app), reached by hook name only - this connector imports nothing
+# of it (B2C-PIM plan §5/§6). Without the app the hooks are empty and everything behaves as before.
+ACCOUNT_DOCTYPE = "Shopify Account"
+HUB_RESOLVER_HOOK = "sales_channel_item_resolver"
+HUB_DEFAULTS_HOOK = "sales_channel_item_defaults"
+HUB_RECORD_HOOK = "sales_channel_item_record"
+POLICY_REJECT = "reject"
+
+
+def _hub_call(hook, *args, **kwargs):
+	"""First registered function of a hub hook, or None when no app provides it."""
+	for fn in frappe.get_hooks(hook) or []:
+		return frappe.get_attr(fn)(*args, **kwargs)
+	return None
+
+
+def resolve_hub_item(setting, sku=None, product_id=None, variant_id=None):
+	if not setting:
+		return None
+	return _hub_call(HUB_RESOLVER_HOOK, ACCOUNT_DOCTYPE, setting.name, sku=sku, product_id=product_id, variant_id=variant_id)
+
+
+def hub_item_defaults(setting):
+	if not setting:
+		return {}
+	return _hub_call(HUB_DEFAULTS_HOOK, ACCOUNT_DOCTYPE, setting.name) or {}
+
+
+def record_hub_item(setting, item_code, sku, product_id=None, variant_id=None):
+	if not (setting and item_code and sku):
+		return None
+	return _hub_call(HUB_RECORD_HOOK, ACCOUNT_DOCTYPE, setting.name, item_code, sku, product_id=product_id, variant_id=variant_id)
+
+
+def link_existing_item(item_code, product_id, variant_id=None, sku=None, company=None):
+	"""An item the hub resolved gets the fork's own link row, so `is_synced()` and `get_item_code()`
+	find it from now on. Idempotent."""
+	if ecommerce_item.is_synced(MODULE_NAME, integration_item_code=str(product_id), variant_id=cstr(variant_id) or None, sku=sku):
+		return
+	row = frappe.get_doc(
+		{
+			"doctype": "Ecommerce Item",
+			"integration": MODULE_NAME,
+			"erpnext_item_code": item_code,
+			"integration_item_code": str(product_id),
+			"variant_id": cstr(variant_id),
+			"sku": sku,
+			"has_variants": 0,
+			"variant_of": frappe.db.get_value("Item", item_code, "variant_of"),
+			"company": company,
+		}
+	)
+	row.flags.ignore_permissions = True
+	row.insert()
+
 
 class ShopifyProduct:
 	def __init__(
@@ -126,16 +181,26 @@ class ShopifyProduct:
 			):
 				item_attr.append("item_attribute_values", {"attribute_value": attr_value, "abbr": attr_value})
 
+	@property
+	def hub_defaults(self):
+		"""Item defaults and policy of the channel this account serves (hub hook, cached per sync)."""
+		if getattr(self, "_hub_defaults", None) is None:
+			self._hub_defaults = hub_item_defaults(self.setting)
+		return self._hub_defaults
+
 	def _create_item(self, product_dict, warehouse, has_variant=0, attributes=None, variant_of=None):
 		price = product_dict.get("price") if variant_of else product_dict.get("variants", [{'price': None}])[0].get("price")
+		defaults = self.hub_defaults
 
 		item_dict = {
 			"variant_of": variant_of,
-			"is_stock_item": 1,
+			# dropship channels (the B2C instance) create no stock items; without a hub: as upstream
+			"is_stock_item": defaults.get("is_stock_item", 1),
+			"delivered_by_supplier": defaults.get("delivered_by_supplier", 0),
 			"item_code": _item_code(product_dict, has_variant),
 			"item_name": _item_name(product_dict.get("title", "")),
 			"description": product_dict.get("body_html") or product_dict.get("title"),
-			"item_group": self._get_item_group(product_dict.get("product_type")),
+			"item_group": self._get_item_group(product_dict.get("product_type"), defaults.get("item_group")),
 			"has_variants": has_variant,
 			"attributes": attributes or [],
 			"stock_uom": product_dict.get("uom") or _("Nos"),
@@ -147,6 +212,13 @@ class ShopifyProduct:
 			"default_supplier": self._get_supplier(product_dict),
 			"shopify_selling_rate": price,
 		}
+		if defaults.get("brand"):
+			item_dict["brand"] = defaults["brand"]
+		if defaults.get("item_tax_template"):
+			item_dict["taxes"] = [{"item_tax_template": defaults["item_tax_template"]}]
+		if defaults.get("pim_missing_field"):
+			# created as a fallback, the PIM has not seen it (E-5 "weich")
+			item_dict[defaults["pim_missing_field"]] = 1
 
 		if self.company:
 			item_dict["custom_company"] = self.company
@@ -208,26 +280,15 @@ class ShopifyProduct:
 		)
 		return attribute_value[0][0] if len(attribute_value) > 0 else cint(variant_attr_val)
 
-	def _get_item_group(self, product_type=None):
-		parent_item_group = get_root_of("Item Group")
-
-		if not product_type:
-			return parent_item_group
-
-		if frappe.db.get_value("Item Group", product_type, "name"):
+	def _get_item_group(self, product_type=None, default_group=None):
+		"""The channel's default group wins; an existing group named like Shopify's product type
+		is used; anything else lands in the root. No group is created from shop free text any
+		more (three spellings of "Füller" in one master, 2026-09-08)."""
+		if default_group and frappe.db.exists("Item Group", default_group):
+			return default_group
+		if product_type and frappe.db.get_value("Item Group", product_type, "name"):
 			return product_type
-		item_group = frappe.get_doc(
-			{
-				"doctype": "Item Group",
-				"item_group_name": product_type,
-				"parent_item_group": parent_item_group,
-				"is_group": "No",
-			}
-		)
-		if self.company:
-			item_group.custom_company = self.company
-		item_group = item_group.insert()
-		return item_group.name
+		return get_root_of("Item Group")
 
 	def _get_supplier(self, product_dict):
 		if product_dict.get("vendor"):
@@ -359,15 +420,35 @@ def _match_sku_and_link_item(item_dict, product_id, variant_id, variant_of=None,
 
 def create_items_if_not_exist(order, company, setting=None):
 	"""Using shopify order, sync all items that are not already synced. `setting` is the
-	account the order belongs to; without it the company lookup decides (single-account case)."""
+	account the order belongs to; without it the company lookup decides (single-account case).
+
+	PIM-first (B2C-PIM plan §6 E4): a line the fork does not know yet is first resolved by the
+	hub's item mapper (channel SKU, product/variant id); a hit only gets the link row. Without a
+	hit the channel's policy decides - reject the order loudly, or create the item as a fallback
+	(flagged) and record the key. Without the hub app nothing changes."""
 	for item in order.get("line_items", []):
 		product_id = item["product_id"]
 		variant_id = item.get("variant_id")
 		sku = item.get("sku")
 		product = ShopifyProduct(product_id, company=company, variant_id=variant_id, sku=sku, setting=setting)
 
-		if not product.is_synced():
-			product.sync_product()
+		if product.is_synced():
+			continue
+		hub_item = resolve_hub_item(product.setting, sku=sku, product_id=product_id, variant_id=variant_id)
+		if hub_item:
+			link_existing_item(hub_item, product_id, variant_id=variant_id, sku=sku, company=product.setting.company)
+			record_hub_item(product.setting, hub_item, sku, product_id=product_id, variant_id=variant_id)
+			continue
+		if product.hub_defaults.get("missing_item_policy") == POLICY_REJECT:
+			frappe.throw(
+				_("Artikel {0} (Shopify {1}/{2}) ist im PIM nicht bekannt; der Kanal weist unbekannte Artikel ab.").format(
+					sku or "-", product_id, variant_id or "-"
+				)
+			)
+		product.sync_product()
+		created = ecommerce_item.get_erpnext_item_code(MODULE_NAME, str(product_id), variant_id=cstr(variant_id) or None)
+		if created:
+			record_hub_item(product.setting, created, sku, product_id=product_id, variant_id=variant_id)
 
 
 def get_item_code(shopify_item):

@@ -48,6 +48,9 @@ SUPPLIER_ID_FIELD = "shopify_supplier_id"
 ADDRESS_ID_FIELD = "shopify_address_id"
 ORDER_ITEM_DISCOUNT_FIELD = "shopify_item_discount"
 ORDER_ITEM_PROPERTIES_FIELD = "shopify_item_properties"
+# The SKU the line was sold under - the channel key; with PIM-first items the item code is the
+# canonical code, so the sold key must travel on the line (B2C-PIM plan §6, hub enrichment).
+ORDER_ITEM_SKU_FIELD = "shopify_sku"
 ORDER_ITEM_PERSONALIZATION_SECTION = "shopify_personalization_section"
 ORDER_ITEM_PERSONALIZED_FIELD = "shopify_personalized"
 # Marketing consent as Shopify records it (email_marketing_consent), kept on the Contact.
