@@ -27,7 +27,7 @@ from ecommerce_integrations.shopify.constants import (
 	# SETTING_DOCTYPE,
 )
 from ecommerce_integrations.shopify.customer import ShopifyCustomer
-from ecommerce_integrations.shopify.product import create_items_if_not_exist, get_item_code
+from ecommerce_integrations.shopify.product import create_items_if_not_exist, get_item_code, hub_item_defaults
 from ecommerce_integrations.shopify.utils import (
 	create_shopify_log,
 	get_user_shopify_account,
@@ -40,6 +40,13 @@ DEFAULT_TAX_FIELDS = {
 	"sales_tax": "default_sales_tax_account",
 	"shipping": "default_shipping_charges_account",
 }
+
+
+def price_list_for(setting):
+	"""The channel's Price List when the hub declares one (B2C-PIM plan E-7: one list per
+	integration - the shop's price stays the rate, the list is the reference the deviation is
+	measured against), else the connector's empty dummy list that keeps ERPNext prices away."""
+	return hub_item_defaults(setting).get("price_list") or get_dummy_price_list()
 
 
 def sync_sales_order(payload, request_id=None, shopify_account=None):
@@ -187,7 +194,7 @@ def create_sales_order(shopify_order, setting, company=None):
 				"delivery_date": delivery_date,
 				"company": setting.company,
 				"currency": shopify_order.get("currency"),
-				"selling_price_list": get_dummy_price_list(),
+				"selling_price_list": price_list_for(setting),
 				"ignore_pricing_rule": 1,
 				"items": items,
 				"taxes": taxes,

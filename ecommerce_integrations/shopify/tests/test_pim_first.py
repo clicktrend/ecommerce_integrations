@@ -130,3 +130,15 @@ class TestSoldSkuOnTheLine(unittest.TestCase):
 		self.assertEqual(items[0]["item_code"], "RP105HD")
 		self.assertEqual(items[0]["shopify_sku"], "105HDla")
 
+
+
+class TestPriceListOnOrder(unittest.TestCase):
+	def test_channel_price_list_wins_over_the_dummy(self):
+		from ecommerce_integrations.shopify import order as order_module
+
+		with patch.object(order_module, "hub_item_defaults", return_value={"price_list": "Mit-Gravur Shopify"}):
+			self.assertEqual(order_module.price_list_for(_setting()), "Mit-Gravur Shopify")
+		with patch.object(order_module, "hub_item_defaults", return_value={}), patch.object(
+			order_module, "get_dummy_price_list", return_value="Ecommerce Integrations - Ignore"
+		):
+			self.assertEqual(order_module.price_list_for(_setting()), "Ecommerce Integrations - Ignore")
