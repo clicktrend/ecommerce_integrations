@@ -118,6 +118,7 @@ class ShopifyProduct:
 			with get_temp_session_context(self.setting):
 				shopify_product = Product.find(self.product_id)
 				product_dict = shopify_product.to_dict()
+				complete_variants(product_dict, lambda: _fetch_all_variants(self.product_id))
 				self._make_item(product_dict)
 
 	def _make_item(self, product_dict):
@@ -325,6 +326,30 @@ def _add_weight_details(product_dict):
 	if variants:
 		product_dict["weight"] = variants[0]["weight"]
 		product_dict["weight_unit"] = variants[0]["weight_unit"]
+
+
+SHOPIFY_INLINE_VARIANT_LIMIT = 100
+
+
+def complete_variants(product_dict, fetch_all):
+	"""Shopify's REST product carries at most 100 variants inline. A product with more (13 pen
+	colours x 8 quantities + 4 mixed packs = 108) lost its last variants silently, and an order
+	line pointing at one of them failed as "not found in the shopify Product master" (#11041,
+	2026-09-10). At the limit the full, paginated variant list replaces the inline one."""
+	variants = product_dict.get("variants") or []
+	if len(variants) >= SHOPIFY_INLINE_VARIANT_LIMIT:
+		product_dict["variants"] = fetch_all()
+	return product_dict
+
+
+def _fetch_all_variants(product_id):
+	from shopify.collection import PaginatedIterator
+	from shopify.resources import Variant
+
+	variants = []
+	for page in PaginatedIterator(Variant.find(product_id=product_id, limit=250)):
+		variants.extend(v.to_dict() for v in page)
+	return variants
 
 
 def _has_variants(product_dict) -> bool:

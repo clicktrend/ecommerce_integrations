@@ -142,3 +142,15 @@ class TestPriceListOnOrder(unittest.TestCase):
 			order_module, "get_dummy_price_list", return_value="Ecommerce Integrations - Ignore"
 		):
 			self.assertEqual(order_module.price_list_for(_setting()), "Ecommerce Integrations - Ignore")
+
+
+class TestVariantsBeyondInlineLimit(unittest.TestCase):
+	def test_below_the_limit_the_inline_list_stays(self):
+		product = {"id": 1, "variants": [{"id": i} for i in range(99)]}
+		product_module.complete_variants(product, lambda: self.fail("must not fetch"))
+		self.assertEqual(len(product["variants"]), 99)
+
+	def test_at_the_limit_the_paginated_list_replaces_it(self):
+		product = {"id": 1, "variants": [{"id": i} for i in range(100)]}
+		product_module.complete_variants(product, lambda: [{"id": i} for i in range(108)])
+		self.assertEqual(len(product["variants"]), 108)
