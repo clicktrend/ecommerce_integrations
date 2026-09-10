@@ -193,13 +193,18 @@ class ShopifyProduct:
 		price = product_dict.get("price") if variant_of else product_dict.get("variants", [{'price': None}])[0].get("price")
 		defaults = self.hub_defaults
 
+		item_code = _item_code(product_dict, has_variant)
+		title = _item_name(product_dict.get("title", ""))
+
 		item_dict = {
 			"variant_of": variant_of,
 			# dropship channels (the B2C instance) create no stock items; without a hub: as upstream
 			"is_stock_item": defaults.get("is_stock_item", 1),
 			"delivered_by_supplier": defaults.get("delivered_by_supplier", 0),
-			"item_code": _item_code(product_dict, has_variant),
-			"item_name": _item_name(product_dict.get("title", "")),
+			"item_code": item_code,
+			# A hub may keep the article code as the item name and take the shop's title into a
+			# field of its own (the B2C instance does); without a hub: the title, as upstream.
+			"item_name": item_code if defaults.get("item_name_from_code") else title,
 			"description": product_dict.get("body_html") or product_dict.get("title"),
 			"item_group": self._get_item_group(product_dict.get("product_type"), defaults.get("item_group")),
 			"has_variants": has_variant,
@@ -213,6 +218,8 @@ class ShopifyProduct:
 			"default_supplier": self._get_supplier(product_dict),
 			"shopify_selling_rate": price,
 		}
+		if defaults.get("channel_title_field"):
+			item_dict[defaults["channel_title_field"]] = title
 		if defaults.get("brand"):
 			item_dict["brand"] = defaults["brand"]
 		if defaults.get("item_tax_template"):
