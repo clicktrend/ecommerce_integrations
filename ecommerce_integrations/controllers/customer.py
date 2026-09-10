@@ -31,7 +31,7 @@ class EcommerceCustomer:
 				"customer_name": customer_name,
 				"customer_group": customer_group,
 				"territory": get_root_of("Territory"),
-				"customer_type": _("Individual"),
+				"customer_type": "Individual",  # a Select value, never translated: under lang de the retry path failed on "Einzelperson" (#11041, 2026-09-10)
 			}
 		)
 
