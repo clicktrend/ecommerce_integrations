@@ -118,6 +118,49 @@ class TestItemGroupAndDefaults(unittest.TestCase):
 		self.assertEqual(captured["item_group"], "Ringe")
 
 
+class TestItemNaming(unittest.TestCase):
+	"""The hub may keep the article code as the item name and take the shop title into a field of
+	its own (B2C, user decision 2026-09-10); without a hub the upstream behaviour holds."""
+
+	def _capture(self, defaults, title="Personalisierter Pelikan Pura K40 | Aluminium | Gravur"):
+		p = ShopifyProduct.__new__(ShopifyProduct)
+		p.setting = _setting()
+		p.company = "c"
+		p._hub_defaults = defaults
+		captured = {}
+
+		def match(item_dict, *a, **k):
+			captured.update(item_dict)
+			return True
+
+		with patch.object(product_module, "_item_code", return_value="PS142"), patch.object(
+			product_module, "_get_item_image", return_value=None
+		), patch.object(frappe.db, "exists", return_value=True), patch.object(
+			product_module, "_match_sku_and_link_item", side_effect=match
+		):
+			p._create_item(
+				{"id": 111, "title": title, "variants": [{"price": "19.90"}], "weight_unit": "g", "variant_id": 222, "sku": "PS142"},
+				None,
+			)
+		return captured
+
+	def test_hub_names_the_item_by_its_code_and_keeps_the_title(self):
+		captured = self._capture({"item_name_from_code": 1, "channel_title_field": "custom_channel_title"})
+		self.assertEqual(captured["item_name"], "PS142")
+		self.assertEqual(captured["custom_channel_title"], "Personalisierter Pelikan Pura K40 | Aluminium | Gravur")
+
+	def test_without_a_hub_the_shop_title_stays_the_name(self):
+		captured = self._capture({})
+		self.assertEqual(captured["item_name"], "Personalisierter Pelikan Pura K40 | Aluminium | Gravur")
+		self.assertNotIn("custom_channel_title", captured)
+
+	def test_a_title_past_140_characters_still_fits_the_title_field(self):
+		long_title = "Kugelschreiber mit Gravur | " * 8
+		captured = self._capture({"item_name_from_code": 1, "channel_title_field": "custom_channel_title"}, title=long_title)
+		self.assertEqual(captured["item_name"], "PS142")
+		self.assertLessEqual(len(captured["custom_channel_title"]), 140)
+
+
 class TestSoldSkuOnTheLine(unittest.TestCase):
 	def test_get_order_items_writes_the_sold_sku(self):
 		from ecommerce_integrations.shopify import order as order_module
@@ -129,6 +172,22 @@ class TestSoldSkuOnTheLine(unittest.TestCase):
 			items = order_module.get_order_items([line], _setting(), "2026-09-10", taxes_inclusive=True)
 		self.assertEqual(items[0]["item_code"], "RP105HD")
 		self.assertEqual(items[0]["shopify_sku"], "105HDla")
+
+	def test_the_line_is_named_by_the_code_when_the_hub_says_so(self):
+		from ecommerce_integrations.shopify import order as order_module
+
+		line = {"product_exists": True, "product_id": 111, "variant_id": 222, "sku": "105HDla", "name": "Sercer Partnerring-Set | Gravur", "quantity": 1, "price": "29.90", "properties": []}
+		with patch.object(order_module, "get_item_code", return_value="RP105HD"), patch.object(order_module, "_get_item_price", return_value=29.9), patch.object(
+			order_module, "_get_total_discount", return_value=0
+		), patch.object(order_module, "hub_item_defaults", return_value={"item_name_from_code": 1}):
+			items = order_module.get_order_items([line], _setting(), "2026-09-10", taxes_inclusive=True)
+		self.assertEqual(items[0]["item_name"], "RP105HD")
+
+		with patch.object(order_module, "get_item_code", return_value="RP105HD"), patch.object(order_module, "_get_item_price", return_value=29.9), patch.object(
+			order_module, "_get_total_discount", return_value=0
+		), patch.object(order_module, "hub_item_defaults", return_value={}):
+			items = order_module.get_order_items([line], _setting(), "2026-09-10", taxes_inclusive=True)
+		self.assertEqual(items[0]["item_name"], "Sercer Partnerring-Set | Gravur")
 
 
 

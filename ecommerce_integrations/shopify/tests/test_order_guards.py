@@ -8,6 +8,9 @@ from ecommerce_integrations.shopify.order import _delivery_date, get_order_items
 
 
 class _Setting:
+	# `name` is what the hub hooks are keyed by (item defaults, naming policy) - a double without
+	# it stopped resembling a Shopify Account on 2026-09-10.
+	name = "z6wkr3-yk.myshopify.com"
 	warehouse = "Stores - Test"
 
 

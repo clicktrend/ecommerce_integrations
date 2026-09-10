@@ -237,6 +237,9 @@ def get_order_items(order_items, setting, delivery_date, taxes_inclusive):
 	items = []
 	all_product_exists = True
 	product_not_exists = []
+	# A hub may name items by their article code (the B2C instance does); the line then carries the
+	# same name as the item master instead of the shop's SEO title.
+	name_from_code = bool(hub_item_defaults(setting).get("item_name_from_code"))
 
 	for shopify_item in order_items:
 		if not shopify_item.get("product_exists"):
@@ -269,7 +272,7 @@ def get_order_items(order_items, setting, delivery_date, taxes_inclusive):
 					"item_code": item_code,
 					# Shopify line item names carry the full SEO title and blow past Frappe's 140
 					# character limit, which aborts the order import (see _item_name in product.py).
-					"item_name": cstr(shopify_item.get("name")).strip()[:140],
+					"item_name": item_code if name_from_code else cstr(shopify_item.get("name")).strip()[:140],
 					"rate": _get_item_price(shopify_item, taxes_inclusive),
 					"delivery_date": delivery_date,
 					"qty": shopify_item.get("quantity"),
