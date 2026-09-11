@@ -151,7 +151,8 @@ def pull_account(account, minutes=None, dry_run=False):
 	if not setting.is_enabled():
 		return {"account": account, "skipped": "account disabled"}
 
-	since = get_cursor(account)
+	stored = get_cursor(account)
+	since = stored
 	if minutes or since is None:
 		since = datetime.now(timezone.utc) - timedelta(minutes=int(minutes or DEFAULT_WINDOW_MINUTES))
 	# The parity window opens with the first real run; earlier orders are never imported here.
@@ -159,11 +160,14 @@ def pull_account(account, minutes=None, dry_run=False):
 	if window_start is None and not dry_run:
 		window_start = since
 		frappe.db.set_default(start_key(account), window_start.isoformat())
+	# The cursor only ever moves forward. Seeding it from the overlap-shifted query start made a
+	# quiet shop lose a minute per run (mit-bildgravur-de: 176 min behind its window start after
+	# two days, 2026-09-11), and a manual `minutes` re-read must not rewind it either.
+	newest = max(stored, since) if stored else since
 	since = since - timedelta(seconds=OVERLAP_SECONDS)
 	since_iso = since.isoformat()
 
 	counts = {}
-	newest = since
 	with get_temp_session_context(setting):
 		pages = PaginatedIterator(
 			shopify.Order.find(status="any", updated_at_min=since_iso, order="updated_at asc", limit=250)
