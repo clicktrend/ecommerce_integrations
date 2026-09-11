@@ -18,6 +18,9 @@ from ecommerce_integrations.shopify.utils import get_company_shopify_account, to
 # The only email_marketing_consent.state that means "may be written to".
 SUBSCRIBED = "subscribed"
 
+# What makes two shipping addresses the same place for the same recipient.
+ADDRESS_MATCH_FIELDS = ("address_title", "address_line1", "address_line2", "city", "pincode", "country")
+
 
 class ShopifyCustomer(EcommerceCustomer):
 	def __init__(self, customer_id: str):
@@ -52,10 +55,10 @@ class ShopifyCustomer(EcommerceCustomer):
 		shopify_address: dict[str, Any],
 		address_type: str = "Billing",
 		email: str | None = None,
-	) -> None:
-		"""Create customer address(es) using Customer dict provided by shopify."""
+	) -> str:
+		"""Create customer address(es) using Customer dict provided by shopify. Returns the address name."""
 		address_fields = _map_address_fields(shopify_address, customer_name, address_type, email)
-		super().create_customer_address(address_fields)
+		return super().create_customer_address(address_fields)
 
 	def update_existing_addresses(self, customer):
 		billing_address = customer.get("billing_address", {}) or customer.get("default_address")
@@ -67,7 +70,24 @@ class ShopifyCustomer(EcommerceCustomer):
 		if billing_address:
 			self._update_existing_address(customer_name, billing_address, "Billing", email)
 		if shipping_address:
-			self._update_existing_address(customer_name, shipping_address, "Shipping", email)
+			# Found or added, never updated in place - see order_shipping_address.
+			self.order_shipping_address(customer_name, shipping_address, email)
+
+	def order_shipping_address(
+		self, customer_name, shopify_address: dict[str, Any], email: str | None = None
+	) -> str | None:
+		"""The shipping address of one order: the customer's address with the same recipient and place, or a
+		new one. The upstream code overwrote the customer's one shipping address with every order, so an earlier
+		order - and the dropship purchase order made from it - moved to the next order's address (B2C shadow
+		2026-09-11, finding S). Returns the address name for the Sales Order."""
+		if not shopify_address:
+			return None
+		wanted = _map_address_fields(shopify_address, customer_name, "Shipping", email)
+		for name in self.get_customer_address_names("Shipping"):
+			current = frappe.db.get_value("Address", name, list(ADDRESS_MATCH_FIELDS), as_dict=True) or {}
+			if all(cstr(current.get(f)).strip() == cstr(wanted.get(f)).strip() for f in ADDRESS_MATCH_FIELDS):
+				return name
+		return self.create_customer_address(customer_name, shopify_address, "Shipping", email)
 
 	def _update_existing_address(
 		self,
@@ -191,10 +211,20 @@ def _ensure_consent_fields() -> None:
 		)
 
 
+def _recipient(shopify_address) -> str:
+	"""The person named on a Shopify address (first + last name, else the combined name)."""
+	first = cstr(shopify_address.get("first_name")).strip()
+	last = cstr(shopify_address.get("last_name")).strip()
+	return " ".join(filter(None, (first, last))) or cstr(shopify_address.get("name")).strip()
+
+
 def _map_address_fields(shopify_address, customer_name, address_type, email):
 	"""returns dict with shopify address fields mapped to equivalent ERPNext fields"""
 	address_fields = {
-		"address_title": customer_name,
+		# A shipping address names the recipient, who is not the ordering customer when the order goes to someone
+		# else. Oro's erpnext connector reads the recipient from address_title (B2C shadow 2026-09-11, finding S:
+		# 11 of 128 orders). A billing address keeps the customer's name.
+		"address_title": (_recipient(shopify_address) if address_type == "Shipping" else "") or customer_name,
 		"address_type": address_type,
 		ADDRESS_ID_FIELD: shopify_address.get("id"),
 		"address_line1": shopify_address.get("address1") or "Address 1",
