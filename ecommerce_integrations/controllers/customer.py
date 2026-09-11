@@ -51,18 +51,41 @@ class EcommerceCustomer:
 		except frappe.DoesNotExistError:
 			return None
 
-	def create_customer_address(self, address: dict[str, str]) -> None:
-		"""Create address from dictionary containing fields used in Address doctype of ERPNext."""
+	def get_customer_address_names(self, address_type: str) -> list[str]:
+		"""Names of the customer's enabled addresses of one type, newest first."""
+		try:
+			customer = self.get_customer_doc().name
+		except frappe.DoesNotExistError:
+			return []
+		return frappe.get_all(
+			"Address",
+			filters=[
+				["Dynamic Link", "link_doctype", "=", "Customer"],
+				["Dynamic Link", "link_name", "=", customer],
+				["address_type", "=", address_type],
+				["disabled", "=", 0],
+			],
+			pluck="name",
+			order_by="creation desc",
+		)
+
+	def create_customer_address(self, address: dict[str, str]) -> str:
+		"""Create address from dictionary containing fields used in Address doctype of ERPNext.
+		Returns the name of the new address."""
 
 		customer_doc = self.get_customer_doc()
 
-		frappe.get_doc(
-			{
-				"doctype": "Address",
-				**address,
-				"links": [{"link_doctype": "Customer", "link_name": customer_doc.name}],
-			}
-		).insert(ignore_mandatory=True)
+		return (
+			frappe.get_doc(
+				{
+					"doctype": "Address",
+					**address,
+					"links": [{"link_doctype": "Customer", "link_name": customer_doc.name}],
+				}
+			)
+			.insert(ignore_mandatory=True)
+			.name
+		)
 
 	def create_customer_contact(self, contact: dict[str, str]) -> None:
 		"""Create contact from dictionary containing fields used in Address doctype of ERPNext."""

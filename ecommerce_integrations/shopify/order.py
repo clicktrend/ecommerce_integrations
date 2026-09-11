@@ -201,6 +201,10 @@ def create_sales_order(shopify_order, setting, company=None):
 			}
 		)
 
+		shipping_address = _order_shipping_address(shopify_order)
+		if shipping_address:
+			so.shipping_address_name = shipping_address
+
 		# Shopify Mit-Gravur sends no tax lines (0 % on every order, prices gross). Pinning the dummy
 		# tax category then blocks every template and the invoice carries no VAT at all - decision 1
 		# of the accounting concept says the gross template of the company must apply instead.
@@ -231,6 +235,22 @@ def create_sales_order(shopify_order, setting, company=None):
 		so = frappe.get_doc("Sales Order", so)
 
 	return so
+
+
+def _order_shipping_address(shopify_order):
+	"""The Address of this order's shipping address (ShopifyCustomer.order_shipping_address), set explicitly on the
+	Sales Order: once a customer has more than one shipping address, ERPNext's default lookup
+	(party.get_party_shipping_address) returns none at all. None for guest orders - they keep the default."""
+	shopify_customer = shopify_order.get("customer") or {}
+	shipping = shopify_order.get("shipping_address")
+	if not (shopify_customer.get("id") and shipping):
+		return None
+	customer = ShopifyCustomer(customer_id=shopify_customer["id"])
+	if not customer.is_synced():
+		return None
+	customer_name = (cstr(shopify_customer.get("first_name")) + " " + cstr(shopify_customer.get("last_name"))).strip()
+	email = shopify_customer.get("email")
+	return customer.order_shipping_address(customer_name or email, shipping, email)
 
 
 def get_order_items(order_items, setting, delivery_date, taxes_inclusive):
