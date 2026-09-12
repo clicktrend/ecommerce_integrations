@@ -467,17 +467,23 @@ def update_taxes_with_shipping_lines(taxes, shipping_lines, setting, items, taxe
 	each such shipping detail consists of a list of tax_lines"""
 	shipping_as_item = cint(setting.add_shipping_as_item) and setting.shipping_item
 	for shipping_charge in shipping_lines:
-		if shipping_charge.get("price"):
-			shipping_discounts = shipping_charge.get("discount_allocations") or []
-			total_discount = sum(flt(discount.get("amount")) for discount in shipping_discounts)
+		shipping_discounts = shipping_charge.get("discount_allocations") or []
+		total_discount = sum(flt(discount.get("amount")) for discount in shipping_discounts)
 
-			shipping_taxes = shipping_charge.get("tax_lines") or []
-			total_tax = sum(flt(discount.get("price")) for discount in shipping_taxes)
+		shipping_taxes = shipping_charge.get("tax_lines") or []
+		total_tax = sum(flt(discount.get("price")) for discount in shipping_taxes)
 
-			shipping_charge_amount = flt(shipping_charge["price"]) - flt(total_discount)
-			if bool(taxes_inclusive):
-				shipping_charge_amount -= total_tax
+		shipping_charge_amount = flt(shipping_charge.get("price")) - flt(total_discount)
+		if bool(taxes_inclusive):
+			shipping_charge_amount -= total_tax
 
+		# The shop sends the price as a STRING, so the free shipping of "0.00" used to pass a plain
+		# truthiness test and add the line with rate 0 - on which ERPNext then filled in the price list
+		# rate, charging shipping the shop had given away (B2C shadow 2026-09-12, finding T). The same
+		# applies to a shipping line discounted to nothing: what the customer was not charged for is
+		# not a line. Testing the amount AFTER the discounts covers both.
+		charged = shipping_charge_amount > 0
+		if charged:
 			if shipping_as_item:
 				items.append(
 					{
@@ -501,7 +507,7 @@ def update_taxes_with_shipping_lines(taxes, shipping_lines, setting, items, taxe
 					}
 				)
 
-		for tax in shipping_charge.get("tax_lines"):
+		for tax in shipping_taxes:
 			taxes.append(
 				{
 					"charge_type": "Actual",
@@ -515,7 +521,7 @@ def update_taxes_with_shipping_lines(taxes, shipping_lines, setting, items, taxe
 					"item_wise_tax_detail": {
 						setting.shipping_item: [flt(tax.get("rate")) * 100, flt(tax.get("price"))]
 					}
-					if shipping_as_item
+					if (shipping_as_item and charged)
 					else {},
 					"dont_recompute_tax": 1,
 				}
