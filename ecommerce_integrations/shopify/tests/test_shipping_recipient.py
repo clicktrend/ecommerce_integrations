@@ -6,7 +6,7 @@ from frappe.utils.nestedset import get_root_of
 
 from ecommerce_integrations.shopify.constants import CUSTOMER_ID_FIELD
 from ecommerce_integrations.shopify.customer import ShopifyCustomer, _map_address_fields
-from ecommerce_integrations.shopify.order import _order_shipping_address
+from ecommerce_integrations.shopify.order import _order_address
 
 SHOP_CUSTOMER_ID = "999000111"
 
@@ -61,13 +61,13 @@ class TestOrderShippingAddress(unittest.TestCase):
 			"email": "erika@example.org"}, "shipping_address": shipping}
 
 	def test_same_place_and_recipient_is_found_again(self):
-		first = self.customer.order_shipping_address("Erika Muster", GIFT)
-		self.assertEqual(self.customer.order_shipping_address("Erika Muster", GIFT), first)
+		first = self.customer.order_address("Erika Muster", GIFT, "Shipping")
+		self.assertEqual(self.customer.order_address("Erika Muster", GIFT, "Shipping"), first)
 		self.assertEqual(len(self.customer.get_customer_address_names("Shipping")), 1)
 
 	def test_a_second_order_to_another_place_keeps_the_first_address(self):
-		first = self.customer.order_shipping_address("Erika Muster", BUYER)
-		second = self.customer.order_shipping_address("Erika Muster", GIFT)
+		first = self.customer.order_address("Erika Muster", BUYER, "Shipping")
+		second = self.customer.order_address("Erika Muster", GIFT, "Shipping")
 
 		self.assertNotEqual(first, second)
 		kept = frappe.db.get_value("Address", first, ["address_title", "city", "pincode"], as_dict=True)
@@ -75,20 +75,20 @@ class TestOrderShippingAddress(unittest.TestCase):
 		self.assertEqual(frappe.db.get_value("Address", second, "address_title"), "Jonas Beispiel")
 
 	def test_update_of_a_returning_customer_adds_instead_of_overwriting(self):
-		first = self.customer.order_shipping_address("Erika Muster", BUYER)
+		first = self.customer.order_address("Erika Muster", BUYER, "Shipping")
 		self.customer.update_existing_addresses({"first_name": "Erika", "last_name": "Muster", "shipping_address": GIFT})
 
 		self.assertEqual(frappe.db.get_value("Address", first, "city"), "Hamm")
 		self.assertEqual(len(self.customer.get_customer_address_names("Shipping")), 2)
 
 	def test_the_sales_order_gets_its_own_address_named_explicitly(self):
-		self.customer.order_shipping_address("Erika Muster", BUYER)
-		gift = self.customer.order_shipping_address("Erika Muster", GIFT)
+		self.customer.order_address("Erika Muster", BUYER, "Shipping")
+		gift = self.customer.order_address("Erika Muster", GIFT, "Shipping")
 		customer = frappe.db.get_value("Customer", {CUSTOMER_ID_FIELD: SHOP_CUSTOMER_ID}, "name")
 
 		# Why the order has to say it: with two shipping addresses ERPNext's default lookup names none.
 		self.assertIsNone(get_party_shipping_address("Customer", customer))
-		self.assertEqual(_order_shipping_address(self._order(GIFT)), gift)
+		self.assertEqual(_order_address(self._order(GIFT), "Shipping"), gift)
 
 	def test_guest_orders_keep_the_default(self):
-		self.assertIsNone(_order_shipping_address({"customer": {}, "shipping_address": GIFT}))
+		self.assertIsNone(_order_address({"customer": {}, "shipping_address": GIFT}, "Shipping"))
