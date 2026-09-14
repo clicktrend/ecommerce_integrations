@@ -18,7 +18,7 @@ from ecommerce_integrations.shopify.utils import get_company_shopify_account, to
 # The only email_marketing_consent.state that means "may be written to".
 SUBSCRIBED = "subscribed"
 
-# What makes two shipping addresses the same place for the same recipient.
+# What makes two addresses of one type the same place for the same person.
 ADDRESS_MATCH_FIELDS = ("address_title", "address_line1", "address_line2", "city", "pincode", "country")
 
 
@@ -29,13 +29,11 @@ class ShopifyCustomer(EcommerceCustomer):
 	def sync_customer(self, customer: dict[str, Any], customer_group: str) -> None:
 		"""Create Customer in ERPNext using shopify's Customer dict."""
 
-		customer_name = cstr(customer.get("first_name")) + " " + cstr(customer.get("last_name"))
-		if len(customer_name.strip()) == 0:
-			customer_name = customer.get("email")
+		customer_name = customer_display_name(customer)
 
 		super().sync_customer(customer_name, customer_group, company=customer.get("company"))
 
-		billing_address = customer.get("billing_address", {}) or customer.get("default_address")
+		billing_address = order_billing_address(customer.get("billing_address"), customer)
 		shipping_address = customer.get("shipping_address", {})
 
 		if billing_address:
@@ -61,52 +59,31 @@ class ShopifyCustomer(EcommerceCustomer):
 		return super().create_customer_address(address_fields)
 
 	def update_existing_addresses(self, customer):
-		billing_address = customer.get("billing_address", {}) or customer.get("default_address")
-		shipping_address = customer.get("shipping_address", {})
-
-		customer_name = cstr(customer.get("first_name")) + " " + cstr(customer.get("last_name"))
+		customer_name = customer_display_name(customer)
 		email = customer.get("email")
+		billing_address = order_billing_address(customer.get("billing_address"), customer)
 
-		if billing_address:
-			self._update_existing_address(customer_name, billing_address, "Billing", email)
-		if shipping_address:
-			# Found or added, never updated in place - see order_shipping_address.
-			self.order_shipping_address(customer_name, shipping_address, email)
+		# Both found or added, never updated in place - see order_address.
+		self.order_address(customer_name, billing_address, "Billing", email)
+		self.order_address(customer_name, customer.get("shipping_address"), "Shipping", email)
 
-	def order_shipping_address(
-		self, customer_name, shopify_address: dict[str, Any], email: str | None = None
+	def order_address(
+		self, customer_name, shopify_address: dict[str, Any] | None, address_type: str, email: str | None = None
 	) -> str | None:
-		"""The shipping address of one order: the customer's address with the same recipient and place, or a
-		new one. The upstream code overwrote the customer's one shipping address with every order, so an earlier
-		order - and the dropship purchase order made from it - moved to the next order's address (B2C shadow
-		2026-09-11, finding S). Returns the address name for the Sales Order."""
+		"""The billing or shipping address of one order: the customer's address of that type with the same
+		person and place, or a new one. Returns the address name for the Sales Order.
+
+		The upstream code overwrote the customer's one address of each type with every order, so an earlier
+		order - its invoice and the dropship purchase order made from it - moved to the next order's address
+		(B2C shadow 2026-09-11, finding S for shipping; 2026-09-12, finding U for billing)."""
 		if not shopify_address:
 			return None
-		wanted = _map_address_fields(shopify_address, customer_name, "Shipping", email)
-		for name in self.get_customer_address_names("Shipping"):
+		wanted = _map_address_fields(shopify_address, customer_name, address_type, email)
+		for name in self.get_customer_address_names(address_type):
 			current = frappe.db.get_value("Address", name, list(ADDRESS_MATCH_FIELDS), as_dict=True) or {}
 			if all(cstr(current.get(f)).strip() == cstr(wanted.get(f)).strip() for f in ADDRESS_MATCH_FIELDS):
 				return name
-		return self.create_customer_address(customer_name, shopify_address, "Shipping", email)
-
-	def _update_existing_address(
-		self,
-		customer_name,
-		shopify_address: dict[str, Any],
-		address_type: str = "Billing",
-		email: str | None = None,
-	) -> None:
-		old_address = self.get_customer_address_doc(address_type)
-
-		if not old_address:
-			self.create_customer_address(customer_name, shopify_address, address_type, email)
-		else:
-			exclude_in_update = ["address_title", "address_type"]
-			new_values = _map_address_fields(shopify_address, customer_name, address_type, email)
-
-			old_address.update({k: v for k, v in new_values.items() if k not in exclude_in_update})
-			old_address.flags.ignore_mandatory = True
-			old_address.save()
+		return self.create_customer_address(customer_name, shopify_address, address_type, email)
 
 	def create_customer_contact(self, shopify_customer: dict[str, Any]) -> None:
 		if not (shopify_customer.get("first_name") and shopify_customer.get("email")):
@@ -209,6 +186,19 @@ def _ensure_consent_fields() -> None:
 				"Save the enabled Shopify Account or run bench migrate to create them."
 			)
 		)
+
+
+def customer_display_name(shopify_customer) -> str | None:
+	"""First and last name of a Shopify customer, else the email: the name on the Customer and on its billing
+	addresses. One derivation for creating and for finding an address again - two made a nameless customer's
+	address unfindable."""
+	name = (cstr(shopify_customer.get("first_name")) + " " + cstr(shopify_customer.get("last_name"))).strip()
+	return name or shopify_customer.get("email")
+
+
+def order_billing_address(billing_address, shopify_customer):
+	"""The billing address of an order: the order's own, else the customer's default address in Shopify."""
+	return billing_address or shopify_customer.get("default_address")
 
 
 def _recipient(shopify_address) -> str:

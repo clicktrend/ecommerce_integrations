@@ -26,7 +26,7 @@ from ecommerce_integrations.shopify.constants import (
 	ACCOUNT_DOCTYPE,
 	# SETTING_DOCTYPE,
 )
-from ecommerce_integrations.shopify.customer import ShopifyCustomer
+from ecommerce_integrations.shopify.customer import ShopifyCustomer, customer_display_name, order_billing_address
 from ecommerce_integrations.shopify.product import create_items_if_not_exist, get_item_code, hub_item_defaults
 from ecommerce_integrations.shopify.utils import (
 	create_shopify_log,
@@ -201,9 +201,12 @@ def create_sales_order(shopify_order, setting, company=None):
 			}
 		)
 
-		shipping_address = _order_shipping_address(shopify_order)
+		shipping_address = _order_address(shopify_order, "Shipping")
 		if shipping_address:
 			so.shipping_address_name = shipping_address
+		billing_address = _order_address(shopify_order, "Billing")
+		if billing_address:
+			so.customer_address = billing_address
 
 		# Shopify Mit-Gravur sends no tax lines (0 % on every order, prices gross). Pinning the dummy
 		# tax category then blocks every template and the invoice carries no VAT at all - decision 1
@@ -237,20 +240,25 @@ def create_sales_order(shopify_order, setting, company=None):
 	return so
 
 
-def _order_shipping_address(shopify_order):
-	"""The Address of this order's shipping address (ShopifyCustomer.order_shipping_address), set explicitly on the
-	Sales Order: once a customer has more than one shipping address, ERPNext's default lookup
-	(party.get_party_shipping_address) returns none at all. None for guest orders - they keep the default."""
+def _order_address(shopify_order, address_type):
+	"""The Address of this order's billing or shipping address (ShopifyCustomer.order_address), set explicitly on
+	the Sales Order. ERPNext's default lookups cannot tell: with more than one shipping address
+	party.get_party_shipping_address returns none at all, and get_default_address sorts only by
+	is_primary_address, which no imported address has - so the billing address was whichever address came
+	first, on 3 of 20 orders the shipping address (B2C shadow 2026-09-12, finding U). None for guest orders -
+	they keep the default."""
 	shopify_customer = shopify_order.get("customer") or {}
-	shipping = shopify_order.get("shipping_address")
-	if not (shopify_customer.get("id") and shipping):
+	if address_type == "Billing":
+		address = order_billing_address(shopify_order.get("billing_address"), shopify_customer)
+	else:
+		address = shopify_order.get("shipping_address")
+	if not (shopify_customer.get("id") and address):
 		return None
 	customer = ShopifyCustomer(customer_id=shopify_customer["id"])
 	if not customer.is_synced():
 		return None
-	customer_name = (cstr(shopify_customer.get("first_name")) + " " + cstr(shopify_customer.get("last_name"))).strip()
 	email = shopify_customer.get("email")
-	return customer.order_shipping_address(customer_name or email, shipping, email)
+	return customer.order_address(customer_display_name(shopify_customer), address, address_type, email)
 
 
 def get_order_items(order_items, setting, delivery_date, taxes_inclusive):
