@@ -26,6 +26,7 @@ class EcommerceIntegrationLog(Document):
 		method: DF.SmallText | None
 		request_data: DF.Code | None
 		response_data: DF.Code | None
+		sales_order: DF.Link | None
 		shopify_account: DF.Link | None
 		status: DF.Data | None
 		title: DF.Data | None
