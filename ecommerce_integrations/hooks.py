@@ -138,6 +138,8 @@ doc_events = {
 	},
 	"Item Price": {"on_change": "ecommerce_integrations.utils.price_list.discard_item_prices"},
 	"Pick List": {"validate": "ecommerce_integrations.unicommerce.pick_list.validate"},
+	# Links a Shopify order webhook's log to its Sales Order (Connections tab).
+	"Ecommerce Integration Log": {"validate": "ecommerce_integrations.shopify.utils.link_log_to_sales_order"},
 	"Sales Invoice": {
 		"on_submit": "ecommerce_integrations.unicommerce.invoice.on_submit",
 		"on_cancel": "ecommerce_integrations.unicommerce.invoice.on_cancel",
@@ -199,6 +201,8 @@ before_tests = "ecommerce_integrations.utils.before_test.before_tests"
 # override_doctype_dashboards = {
 # 	"Task": "ecommerce_integrations.task.get_dashboard_data"
 # }
+# Connections tab of the Sales Order: the Shopify logs of the order (shopify.dashboard).
+override_doctype_dashboards = {"Sales Order": "ecommerce_integrations.shopify.dashboard.sales_order"}
 
 # exempt linked doctypes from being automatically cancelled
 #

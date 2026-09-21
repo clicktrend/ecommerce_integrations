@@ -8,6 +8,7 @@
   "title",
   "integration",
   "shopify_account",
+  "sales_order",
   "status",
   "method",
   "message",
@@ -76,11 +77,21 @@
    "in_standard_filter": 1,
    "label": "Shopify Account",
    "options": "Shopify Account"
+  },
+  {
+   "description": "The order this log belongs to. Set for order webhooks once the order exists (shopify.utils.link_log_to_sales_order).",
+   "fieldname": "sales_order",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Sales Order",
+   "options": "Sales Order",
+   "read_only": 1,
+   "search_index": 1
   }
  ],
  "in_create": 1,
  "links": [],
- "modified": "2025-10-28 16:06:18.084320",
+ "modified": "2026-09-17 12:00:00.000000",
  "modified_by": "user@nexusdemo.com",
  "module": "Ecommerce Integrations",
  "name": "Ecommerce Integration Log",

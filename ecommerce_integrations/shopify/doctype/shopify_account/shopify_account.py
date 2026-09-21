@@ -45,6 +45,9 @@ from ecommerce_integrations.shopify.utils import (
 	migrate_from_old_connector,
 )
 
+# Raw order fields the B2C app's section "Sales Channel" repeats (get_custom_fields).
+SHOWN_WITHOUT_SALES_CHANNEL = "eval:!doc.sales_channel"
+
 
 class ShopifyAccount(SettingController):
 	def is_enabled(self) -> bool:
@@ -300,6 +303,9 @@ def get_custom_fields():
 			)
 		],
 		"Sales Order": [
+			# Number, account, gateway and order time repeat what the B2C app's section "Sales Channel"
+			# shows once an order carries a channel (user 2026-09-17): the form hides them there and
+			# keeps them for orders without one. Stored either way - the connector reads them.
 			# Data + unique: Shopify retries a webhook up to 19 times over 48 h whenever the 200
 			# is late; the "does it exist" check in sync_sales_order is a race between two workers.
 			# The unique index is the guard that survives that race (IDs are 64-bit, < 140 chars).
@@ -319,6 +325,7 @@ def get_custom_fields():
 				insert_after=ORDER_ID_FIELD,
 				read_only=1,
 				print_hide=1,
+				depends_on=SHOWN_WITHOUT_SALES_CHANNEL,
 			),
 			dict(
 				fieldname=ORDER_STATUS_FIELD,
@@ -339,6 +346,7 @@ def get_custom_fields():
 				read_only=1,
 				print_hide=1,
 				in_standard_filter=0,
+				depends_on=SHOWN_WITHOUT_SALES_CHANNEL,
 			),
 			dict(
 				fieldname=ORDER_FINANCIAL_STATUS_FIELD,
@@ -355,6 +363,7 @@ def get_custom_fields():
 				insert_after=ORDER_FINANCIAL_STATUS_FIELD,
 				read_only=1,
 				print_hide=1,
+				depends_on=SHOWN_WITHOUT_SALES_CHANNEL,
 			),
 			dict(
 				fieldname=ORDER_PLACED_AT_FIELD,
@@ -363,6 +372,7 @@ def get_custom_fields():
 				insert_after=ORDER_PAYMENT_GATEWAY_FIELD,
 				read_only=1,
 				print_hide=1,
+				depends_on=SHOWN_WITHOUT_SALES_CHANNEL,
 			),
 			dict(
 				fieldname=ORDER_FULFILLMENT_ID_FIELD,

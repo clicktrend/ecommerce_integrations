@@ -1,18 +1,29 @@
 # Copyright (c) 2021, Frappe and contributors
 # For license information, please see LICENSE
 
+import json
+
 import frappe
 from frappe import _, _dict
+from frappe.utils import cstr
 
 from ecommerce_integrations.ecommerce_integrations.doctype.ecommerce_integration_log.ecommerce_integration_log import (
 	create_log,
 )
 from ecommerce_integrations.shopify.constants import (
+	EVENT_MAPPER,
 	MODULE_NAME,
+	ORDER_ID_FIELD,
 	# OLD_SETTINGS_DOCTYPE,
 	# SETTING_DOCTYPE,
 	ACCOUNT_DOCTYPE,
 )
+
+# Where the payload of each order webhook names its order (link_log_to_sales_order).
+ORDER_ID_KEY_BY_METHOD = {
+	**{method: "id" for topic, method in EVENT_MAPPER.items() if topic.startswith("orders/")},
+	EVENT_MAPPER["refunds/create"]: "order_id",
+}
 
 
 def to_site_datetime(value):
@@ -84,6 +95,43 @@ def get_company_shopify_account(company):
 
 def create_shopify_log(**kwargs):
 	return create_log(module_def=MODULE_NAME, **kwargs)
+
+
+def order_id_from_log(method, request_data):
+	"""The Shopify order id a log of an order webhook carries in its payload, else None.
+
+	Refunds name the order in `order_id` (their own `id` is the refund); every orders/* topic is
+	the order itself. Other logs (products, oauth, inventory) never point at an order - their `id`
+	belongs to another resource and must not be looked up as one.
+	"""
+	key = ORDER_ID_KEY_BY_METHOD.get(method or "")
+	if not key or not request_data:
+		return None
+	try:
+		payload = json.loads(request_data) if isinstance(request_data, str) else request_data
+	except ValueError:
+		return None
+	order_id = payload.get(key) if isinstance(payload, dict) else None
+	return cstr(order_id) if order_id else None
+
+
+def sales_order_for_log(method, request_data):
+	order_id = order_id_from_log(method, request_data)
+	if not order_id:
+		return None
+	return frappe.db.get_value("Sales Order", {ORDER_ID_FIELD: order_id}, "name")
+
+
+def link_log_to_sales_order(doc, method=None):
+	"""Ecommerce Integration Log validate: fill `sales_order`, so the order lists its logs under
+	Connections. Runs on every save until it finds the order - the orders/create log gets it when the
+	sync reports Success, a rolled back sync finds nothing and stays empty.
+
+	Silent on a site whose log has no such column yet (new code before its migrate): a webhook log that
+	fails to save is a lost webhook."""
+	if doc.get("integration") != MODULE_NAME or doc.get("sales_order") or not doc.meta.has_field("sales_order"):
+		return
+	doc.sales_order = sales_order_for_log(doc.get("method"), doc.get("request_data"))
 
 
 def migrate_from_old_connector(payload=None, request_id=None):
