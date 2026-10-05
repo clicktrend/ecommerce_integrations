@@ -1,14 +1,15 @@
 import frappe
 
-from ecommerce_integrations.shopify.constants import SETTING_DOCTYPE
-from ecommerce_integrations.shopify.doctype.shopify_setting.shopify_setting import (
-	setup_custom_fields,
-)
+from ecommerce_integrations.shopify.doctype.shopify_account.shopify_account import setup_custom_fields
+
+LEGACY_SETTING_DOCTYPE = "Shopify Setting"
 
 
 def execute():
-	frappe.reload_doc("shopify", "doctype", "shopify_setting")
-
-	settings = frappe.get_doc(SETTING_DOCTYPE)
-	if settings.is_enabled():
+	# The Shopify Setting single is gone; its stored values may still be in tabSingles on a
+	# site that ran the old connector. Read them raw - the doctype's meta no longer exists.
+	enabled = frappe.db.get_value(
+		"Singles", {"doctype": LEGACY_SETTING_DOCTYPE, "field": "enable_shopify"}, "value"
+	)
+	if frappe.utils.cint(enabled):
 		setup_custom_fields()
