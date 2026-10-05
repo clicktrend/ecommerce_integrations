@@ -328,7 +328,7 @@ def update_taxes_with_shipping_lines(taxes, shipping_lines, setting, items, taxe
 				taxes.append(
 					{
 						"charge_type": "Actual",
-						"account_head": get_tax_account_head(shipping_charge, charge_type="shipping"),
+						"account_head": get_tax_account_head(shipping_charge, setting, charge_type="shipping"),
 						"description": get_tax_account_description(shipping_charge, setting)
 						or shipping_charge["title"],
 						"tax_amount": shipping_charge_amount,
@@ -340,7 +340,7 @@ def update_taxes_with_shipping_lines(taxes, shipping_lines, setting, items, taxe
 			taxes.append(
 				{
 					"charge_type": "Actual",
-					"account_head": get_tax_account_head(tax, charge_type="sales_tax"),
+					"account_head": get_tax_account_head(tax, setting, charge_type="sales_tax"),
 					"description": (
 						get_tax_account_description(tax, setting)
 						or f"{tax.get('title')} - {tax.get('rate') * 100.0:.2f}%"
