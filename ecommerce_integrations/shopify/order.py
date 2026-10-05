@@ -57,7 +57,7 @@ def sync_sales_order(payload, request_id=None, shopify_account=None):
 			else:
 				customer.update_existing_addresses(shopify_customer)
 
-		create_items_if_not_exist(order, company=shopify_account.company)
+		create_items_if_not_exist(order, company=shopify_account.company, setting=shopify_account)
 
 		create_order(order, shopify_account)
 	except Exception as e:
@@ -430,7 +430,7 @@ def sync_old_orders():
 				log = create_shopify_log(
 					method=EVENT_MAPPER["orders/create"], request_data=json.dumps(order), make_new=True, shopify_account=shopify_setting.name
 				)
-				sync_sales_order(order, request_id=log.name, setting=shopify_setting)
+				sync_sales_order(order, request_id=log.name, shopify_account=shopify_setting)
 
 		shopify_setting.sync_old_orders = 0
 		shopify_setting.save()
