@@ -164,8 +164,18 @@ class ShopifyAccount(SettingController):
 			else:
 				password = self._get_password_safe("password")
 
-			if password:
-				connection.unregister_webhooks(self.shopify_url, password)
+			# Only call Shopify when there is something to unregister, and never let the call
+			# block the save: a disabled account is how credentials get corrected, and with
+			# wrong ones a 401 here refused exactly the save that would fix them.
+			if password and self.webhooks:
+				try:
+					connection.unregister_webhooks(self.shopify_url, password)
+				except Exception:
+					frappe.log_error(title=_("Shopify: unregistering webhooks failed"))
+					frappe.msgprint(
+						_("Could not unregister the webhooks from Shopify. Remove them in the Shopify admin if they remain."),
+						alert=True,
+					)
 
 			self.webhooks = list()  # remove all webhooks
 
