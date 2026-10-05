@@ -353,4 +353,18 @@ def setup_custom_fields():
 		],
 	}
 
+	# Item, Customer and Item Group carry the company an account works for: the product and
+	# customer sync write it, and Ecommerce Item fetches it from Item. Without the field,
+	# inserting an Ecommerce Item fails on a fresh site with "Unknown column 'custom_company'".
+	company_field = dict(
+		fieldname="custom_company",
+		label="Company",
+		fieldtype="Link",
+		options="Company",
+		read_only=1,
+		print_hide=1,
+	)
+	for doctype in ("Item", "Customer", "Item Group"):
+		custom_fields.setdefault(doctype, []).append(company_field)
+
 	create_custom_fields(custom_fields)
