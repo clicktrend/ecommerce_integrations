@@ -42,7 +42,7 @@ def sync_new_orders(client: UnicommerceAPIClient = None, force=False):
 
 	# check if need to run based on configured sync frequency.
 	# Note: This also updates last_order_sync if function runs.
-	if not force and not need_to_run(SETTINGS_DOCTYPE, "order_sync_frequency", "last_order_sync"):
+	if not force and not need_to_run(SETTINGS_DOCTYPE, None, "order_sync_frequency", "last_order_sync"):
 		return
 
 	if client is None:
