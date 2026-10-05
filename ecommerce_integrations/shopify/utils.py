@@ -39,13 +39,22 @@ def get_user_shopify_account():
 
 
 def get_company_shopify_account(company):
+	"""The Shopify account to act with for a company.
+
+	A company can have more than one account - a second store, or a retired one kept for its
+	history. `frappe.db.exists` returns an arbitrary row of the match set and could hand back
+	a disabled account next to an enabled one; ShopifyProduct then refused with "integration
+	is disabled". Prefer an enabled account; fall back to a disabled one only when the company
+	has none enabled, so single-account companies behave as before.
+	"""
 	try:
-		sa_exists = frappe.db.exists("Shopify Account", {"company": company})
-		if sa_exists:
-			account = frappe.get_doc("Shopify Account", sa_exists)
-			return account
+		name = frappe.db.get_value("Shopify Account", {"company": company, "enable_shopify": 1}, "name")
+		if not name:
+			name = frappe.db.get_value("Shopify Account", {"company": company}, "name")
+		if name:
+			return frappe.get_doc("Shopify Account", name)
 		return None
-	except Exception as e:
+	except Exception:
 		return None
 
 def create_shopify_log(**kwargs):
