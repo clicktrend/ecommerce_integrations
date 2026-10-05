@@ -377,6 +377,10 @@ def cancel_order(payload, request_id=None, shopify_account=None):
 	frappe.flags.request_id = request_id
 
 	order = payload
+	# The webhook and the log retry hand the account document through; a caller from the
+	# console or a script may pass its name. Load it here, as sync_sales_order() does.
+	if isinstance(shopify_account, str):
+		shopify_account = frappe.get_doc("Shopify Account", shopify_account)
 	shopify_account_name = shopify_account.name if shopify_account else None
 
 	try:
